@@ -7,10 +7,8 @@
 		x: number; // Position on the whiteboard (unscaled stage coords)
 		y: number; // Position on the whiteboard (unscaled stage coords)
 		props: Record<string, any>;
-		// Add width/height if needed for precise drag offset calculation,
-		// but for simplicity, we'll use top-left corner dragging for now.
-		width?: number;
-		height?: number;
+		width: number; // Node width in stage units
+		height: number; // Node height in stage units
 	};
 </script>
 
@@ -22,7 +20,6 @@
 	// Import node types
 	import ImageNode from './ImageNode.svelte';
 	import TextNode from './TextNode.svelte';
-	import BaseNode from './BaseNode.svelte';
 
 	// --- Exports ---
 	export let nodes: NodeData[] = [];
@@ -30,6 +27,12 @@
 	export let maxZoom = 5.0;
 	export let zoomSensitivity = 0.002;
 	export let gridSpacing = 20; // Grid size in stage units
+
+	// --- Constants ---
+	const DEFAULT_NODE_WIDTH = 200;
+	const DEFAULT_NODE_HEIGHT = 150;
+	const MIN_NODE_WIDTH = 30;
+	const MIN_NODE_HEIGHT = 30;
 
 	// --- State ---
 	let panX = 0;
@@ -46,8 +49,20 @@
 	let draggedNodeId: string | null = null;
 	let dragStartX = 0; // Mouse position when drag started (screen coords)
 	let dragStartY = 0;
-	let nodeStartPanX = 0; // Node's original X position when drag started (stage coords)
-	let nodeStartPanY = 0; // Node's original Y position when drag started (stage coords)
+	let nodeStartDragX = 0; // Node's original X position when drag started (stage coords)
+	let nodeStartDragY = 0; // Node's original Y position when drag started (stage coords)
+
+	// Node resizing state
+	let isResizingNode = false;
+	let resizingNodeId: string | null = null;
+	type ResizeHandleType = 'tl' | 't' | 'tr' | 'l' | 'r' | 'bl' | 'b' | 'br';
+	let activeResizeHandle: ResizeHandleType | null = null;
+	let resizeStartMouseX = 0; // Mouse position when resize started (screen coords)
+	let resizeStartMouseY = 0;
+	let nodeInitialX = 0; // Node's original state when resize started (stage coords)
+	let nodeInitialY = 0;
+	let nodeInitialWidth = 0;
+	let nodeInitialHeight = 0;
 
 	// Selection state
 	let selectedNodeId: string | null = null;
@@ -94,16 +109,11 @@
 		};
 	}
 
-	// Add this function inside the <script lang="ts"> block of /lib/Whiteboard.svelte
-	// along with other exported functions like addNode, panBy, etc.
-
 	export function getStageCoordinatesForScreenCenter(): { x: number; y: number } | null {
 		if (!containerElement) {
-			// This warning would now originate from within Whiteboard.svelte if its own container isn't ready
 			console.warn('Whiteboard.getStageCoordinatesForScreenCenter: containerElement not ready.');
 			return null;
 		}
-		// screenToStageCoordinates is already defined in this component
 		return screenToStageCoordinates(
 			containerElement.clientWidth / 2,
 			containerElement.clientHeight / 2
@@ -112,14 +122,38 @@
 
 	// --- Event Handlers ---
 
-	// Use Pointer Events for better compatibility (touch + mouse) and capturing
 	function handlePointerDown(event: PointerEvent) {
-		const targetElement = event.target as Element;
+		const targetElement = event.target as HTMLElement;
 		const nodeWrapper = targetElement.closest('.node-wrapper'); // Check if click is on a node
+		const resizeHandle = targetElement.dataset.resizeHandle as ResizeHandleType;
 
 		if (event.button !== 0) return; // Only handle left clicks
 
-		if (nodeWrapper) {
+		if (resizeHandle && nodeWrapper && selectedNodeId === nodeWrapper.getAttribute('data-node-id')) {
+			// --- Node Resize Start ---
+			event.stopPropagation(); // Prevent whiteboard panning/node dragging
+
+			const nodeId = nodeWrapper.getAttribute('data-node-id');
+			if (!nodeId) return;
+			const node = nodes.find((n) => n.id === nodeId);
+			if (!node) return;
+
+			isResizingNode = true;
+			resizingNodeId = nodeId;
+			activeResizeHandle = resizeHandle;
+
+			resizeStartMouseX = event.clientX;
+			resizeStartMouseY = event.clientY;
+			nodeInitialX = node.x;
+			nodeInitialY = node.y;
+			nodeInitialWidth = node.width;
+			nodeInitialHeight = node.height;
+
+			containerElement.style.userSelect = 'none';
+			containerElement.setPointerCapture(event.pointerId);
+			// Cursor will be set by CSS on the handle
+			// containerElement.style.cursor = getComputedStyle(targetElement).cursor || 'default';
+		} else if (nodeWrapper) {
 			// --- Node Drag Start ---
 			event.stopPropagation(); // Prevent whiteboard panning when starting node drag
 
@@ -136,8 +170,8 @@
 			// Store initial positions
 			dragStartX = event.clientX;
 			dragStartY = event.clientY;
-			nodeStartPanX = node.x;
-			nodeStartPanY = node.y;
+			nodeStartDragX = node.x;
+			nodeStartDragY = node.y;
 
 			// Prevent text selection during drag
 			containerElement.style.userSelect = 'none';
@@ -158,7 +192,50 @@
 	function handlePointerMove(event: PointerEvent) {
 		if (!event.isPrimary) return; // Ignore multi-touch/pen secondary pointers for simplicity
 
-		if (isDraggingNode && draggedNodeId) {
+		if (isResizingNode && resizingNodeId && activeResizeHandle) {
+			// --- Node Resize Move ---
+			event.preventDefault();
+
+			const dxScreen = event.clientX - resizeStartMouseX;
+			const dyScreen = event.clientY - resizeStartMouseY;
+
+			const dxStage = dxScreen / zoom;
+			const dyStage = dyScreen / zoom;
+
+			let newX = nodeInitialX;
+			let newY = nodeInitialY;
+			let newWidth = nodeInitialWidth;
+			let newHeight = nodeInitialHeight;
+
+			// Apply changes based on handle type
+			if (activeResizeHandle.includes('l')) {
+				newWidth = Math.max(MIN_NODE_WIDTH, nodeInitialWidth - dxStage);
+				newX = nodeInitialX + nodeInitialWidth - newWidth;
+			} else if (activeResizeHandle.includes('r')) {
+				newWidth = Math.max(MIN_NODE_WIDTH, nodeInitialWidth + dxStage);
+			}
+
+			if (activeResizeHandle.includes('t')) {
+				newHeight = Math.max(MIN_NODE_HEIGHT, nodeInitialHeight - dyStage);
+				newY = nodeInitialY + nodeInitialHeight - newHeight;
+			} else if (activeResizeHandle.includes('b')) {
+				newHeight = Math.max(MIN_NODE_HEIGHT, nodeInitialHeight + dyStage);
+			}
+
+			// For middle handles (t, b, l, r), only one dimension changes
+			if (activeResizeHandle === 't' || activeResizeHandle === 'b') {
+				newWidth = nodeInitialWidth; // Keep width constant
+				newX = nodeInitialX;
+			}
+			if (activeResizeHandle === 'l' || activeResizeHandle === 'r') {
+				newHeight = nodeInitialHeight; // Keep height constant
+				newY = nodeInitialY;
+			}
+
+			nodes = nodes.map((n) =>
+				n.id === resizingNodeId ? { ...n, x: newX, y: newY, width: newWidth, height: newHeight } : n
+			);
+		} else if (isDraggingNode && draggedNodeId) {
 			// --- Node Drag Move ---
 			event.preventDefault(); // Prevent default behaviors like text selection/image dragging
 
@@ -171,8 +248,8 @@
 			const dyStage = dyScreen / zoom;
 
 			// Calculate new node position in stage coordinates
-			const newX = nodeStartPanX + dxStage;
-			const newY = nodeStartPanY + dyStage;
+			const newX = nodeStartDragX + dxStage;
+			const newY = nodeStartDragY + dyStage;
 
 			// Update the specific node's position (immutable update for reactivity)
 			nodes = nodes.map((n) => (n.id === draggedNodeId ? { ...n, x: newX, y: newY } : n));
@@ -188,7 +265,17 @@
 	function handlePointerUp(event: PointerEvent) {
 		if (event.button !== 0) return; // Only handle left releases
 
-		if (isDraggingNode) {
+		if (isResizingNode) {
+			containerElement.releasePointerCapture(event.pointerId);
+			isResizingNode = false;
+			resizingNodeId = null;
+			activeResizeHandle = null;
+			tick().then(() => {
+				if (containerElement) {
+					containerElement.style.userSelect = '';
+				}
+			});
+		} else if (isDraggingNode) {
 			containerElement.releasePointerCapture(event.pointerId);
 			isDraggingNode = false;
 			draggedNodeId = null;
@@ -207,13 +294,15 @@
 
 		// Reset cursor regardless of what was happening
 		if (containerElement) {
+			// Reset cursor to grab unless hovering over a specific interactive element
+			// For simplicity, always set to grab. CSS will override for handles.
 			containerElement.style.cursor = 'grab';
 		}
 	}
 
 	function handlePointerLeave(event: PointerEvent) {
-		// If pointer leaves the container while dragging/panning, treat it like pointerUp
-		if (isDraggingNode || isPanning) {
+		// If pointer leaves the container while dragging/panning/resizing, treat it like pointerUp
+		if (isDraggingNode || isPanning || isResizingNode) {
 			handlePointerUp(event);
 		}
 	}
@@ -280,19 +369,20 @@
 				break;
 			default:
 				console.error(`Unknown node type: ${type}`);
+				// @ts-expect-error Return undefined or handle error appropriately
+				return;
 		}
 		const newNode: NodeData = {
 			id: crypto.randomUUID(),
 			component,
 			x, // Stage coordinates
 			y, // Stage coordinates
-			...(props.width !== undefined && { width: props.width }),
-			...(props.height !== undefined && { height: props.height }),
+			width: typeof props.width === 'number' ? props.width : DEFAULT_NODE_WIDTH,
+			height: typeof props.height === 'number' ? props.height : DEFAULT_NODE_HEIGHT,
 			props
 		};
 
 		nodes = [...nodes, newNode];
-		console.log(newNode);
 		return newNode;
 	}
 
@@ -342,8 +432,6 @@
 		zoom = clampedZoom;
 	}
 
-	// screenToStageCoordinates and stageToScreenCoordinates are already defined above
-
 	export function getViewport(): { panX: number; panY: number; zoom: number } {
 		return { panX, panY, zoom };
 	}
@@ -355,6 +443,8 @@
 	export function setSelectedNodeId(id: string | null): void {
 		selectedNodeId = id;
 	}
+
+	const resizeHandles: ResizeHandleType[] = ['tl', 't', 'tr', 'l', 'r', 'bl', 'b', 'br'];
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -374,16 +464,28 @@
 				data-node-id={node.id}
 				style:left="{node.x}px"
 				style:top="{node.y}px"
-        style = "width:{node.width}px; height: {node.height}px"
+				style:width="{node.width}px"
+				style:height="{node.height}px"
 				style:position="absolute"
-				style:cursor="pointer"
+				style:cursor={isDraggingNode && draggedNodeId === node.id ? 'grabbing' : 'grab'}
 			>
 				<!-- Pass down selection state if the node component needs it -->
 				<svelte:component
 					this={node.component}
 					isSelected={node.id === selectedNodeId}
+					nodeId={node.id}
 					{...node.props}
 				/>
+				{#if node.id === selectedNodeId}
+					{#each resizeHandles as handle}
+						<div
+							class="resize-handle resize-handle-{handle}"
+							data-resize-handle={handle}
+							on:pointerdown|stopPropagation={() => {}}
+							aria-label="Resize node {handle.replace('t', 'top ').replace('b', 'bottom ').replace('l', 'left ').replace('r', 'right ').trim()}"
+						></div>
+					{/each}
+				{/if}
 			</div>
 		{/each}
 	</div>
@@ -406,34 +508,25 @@
 		/* transform-origin: 0 0; Set in style attribute */
 		will-change: transform, background-position; /* Performance hint */
 		/* Dynamic Grid Background */
-		background-image:
-			linear-gradient(to right, #e9ecef 1px, transparent 1px),
+		background-image: linear-gradient(to right, #e9ecef 1px, transparent 1px),
 			/* Grid line color */ linear-gradient(to bottom, #e9ecef 1px, transparent 1px);
 		/* background-size and background-position are set dynamically via style attribute */
 	}
 
 	.node-wrapper {
 		/* Base node wrapper styles */
-		/* position: absolute; Set in element style */
-		/* cursor: pointer; Set in element style */
 		/* Add transition for smoother selection outline appearance/disappearance */
-		transition:
-			outline-color 0.15s ease-in-out,
-			outline-width 0.15s ease-in-out;
+		transition: outline-color 0.15s ease-in-out, outline-width 0.15s ease-in-out;
 		outline: 2px solid transparent; /* Reserve space for outline */
 		outline-offset: 3px;
 		z-index: 1; /* Base z-index */
+		display: flex; /* To help svelte:component fill the space */
+		flex-direction: column; /* If svelte:component needs to stack things */
 	}
 
 	.node-wrapper.selected {
 		outline-color: #007bff; /* Selection outline color */
 		z-index: 10; /* Bring selected node to front */
-	}
-
-	/* Prevent selecting text *within* nodes when dragging the wrapper */
-	.node-wrapper :global(*) {
-		/* Apply to all children of the wrapper */
-		user-select: none; /* Standard */
 	}
 
 	/* Selectively re-enable text selection for specific elements *inside* node components
@@ -445,6 +538,61 @@
 		user-select: text; /* Allow text selection for inputs/editable areas */
 		/* Ensure these elements can still be focused and interacted with */
 		cursor: text;
+	}
+
+	.resize-handle {
+		position: absolute;
+		width: 10px;
+		height: 10px;
+		background-color: #007bff;
+		border: 1px solid white;
+		box-sizing: border-box;
+		z-index: 11; /* Above node content but below other selected nodes perhaps */
+	}
+
+	.resize-handle-tl {
+		top: -5px;
+		left: -5px;
+		cursor: nwse-resize;
+	}
+	.resize-handle-t {
+		top: -5px;
+		left: 50%;
+		transform: translateX(-50%);
+		cursor: ns-resize;
+	}
+	.resize-handle-tr {
+		top: -5px;
+		right: -5px;
+		cursor: nesw-resize;
+	}
+	.resize-handle-l {
+		top: 50%;
+		left: -5px;
+		transform: translateY(-50%);
+		cursor: ew-resize;
+	}
+	.resize-handle-r {
+		top: 50%;
+		right: -5px;
+		transform: translateY(-50%);
+		cursor: ew-resize;
+	}
+	.resize-handle-bl {
+		bottom: -5px;
+		left: -5px;
+		cursor: nesw-resize;
+	}
+	.resize-handle-b {
+		bottom: -5px;
+		left: 50%;
+		transform: translateX(-50%);
+		cursor: ns-resize;
+	}
+	.resize-handle-br {
+		bottom: -5px;
+		right: -5px;
+		cursor: nwse-resize;
 	}
 
 	.whiteboard-container:focus {

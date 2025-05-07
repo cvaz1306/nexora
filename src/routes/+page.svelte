@@ -8,22 +8,31 @@
 
 	let whiteboardInstance: Whiteboard;
 
+	const DEFAULT_NODE_WIDTH = 200; // Re-define or import from Whiteboard if possible
+	const DEFAULT_NODE_HEIGHT = 150; // Re-define or import from Whiteboard if possible
+
 	let nodes: NodeData[] = [
 		{
 			id: 'initial-text',
 			component: TextNode as unknown as ComponentType<SvelteComponent>,
 			x: 0,
 			y: 0,
-			props: { text: 'Hello Whiteboard!', fontSize: 24 }
+			width: 250, // Explicit width for the node container
+			height: 180, // Explicit height for the node container
+			props: {
+				text: 'Hello Whiteboard!\n\nTry resizing me.\nOr dragging me around.',
+				fontSize: 20
+			}
 		},
 		{
 			id: 'initial-image',
 			component: ImageNode as unknown as ComponentType<SvelteComponent>,
 			x: 800,
 			y: 0,
-            width: 200,
-            height: 200,
-			props: { src: 'https://svelte.dev/favicon.png', alt: 'Svelte Logo', width: 50 }
+			width: 200, // Explicit width for the node container
+			height: 200, // Explicit height for the node container
+			// props.width and props.height here are passed to ImageNode, which can use them for <img> attributes
+			props: { src: 'https://svelte.dev/favicon.png', alt: 'Svelte Logo', width: 50, height: 50 }
 		}
 	];
 
@@ -39,9 +48,10 @@
                                   e.g., <strong>text</strong> <em>Quick note</em> (shorthand)
                                   (Content is optional, defaults to random text)
 
-<strong>add image</strong> <em>[url]</em>            - Adds an image node.
+<strong>add image</strong> <em>[url|upload]</em>    - Adds an image node.
                                   e.g., <strong>add image</strong> <em>https://svelte.dev/favicon.png</em>
                                   e.g., <strong>image</strong> <em>https://picsum.photos/200</em> (shorthand)
+                                  e.g., <strong>image</strong> <em>upload</em> (opens file dialog)
                                   (URL is optional, defaults to a placeholder)
 
 <strong>zoom in</strong> <em>[factor]</em>             - Zooms in. Default factor: 1.2.
@@ -62,7 +72,6 @@
     `;
 
 	function executeAddTextNode(text?: string) {
-		// const container = getWhiteboardContainer(); // Removed
 		if (!whiteboardInstance) {
 			console.warn('Whiteboard instance not available for adding text node.');
 			return;
@@ -77,8 +86,9 @@
 			return;
 		}
 
-		const randomX = viewCenter.x + (Math.random() - 0.5) * 150;
-		const randomY = viewCenter.y + (Math.random() - 0.5) * 150;
+		// Center the new node roughly
+		const randomX = viewCenter.x - DEFAULT_NODE_WIDTH / 2 + (Math.random() - 0.5) * 50;
+		const randomY = viewCenter.y - DEFAULT_NODE_HEIGHT / 2 + (Math.random() - 0.5) * 50;
 		const nodeText = text?.trim() || `Random ${Math.random().toString(36).substring(7)}`;
 
 		whiteboardInstance.addNode('text', randomX, randomY, { text: nodeText, fontSize: 16 });
@@ -86,7 +96,6 @@
 	}
 
 	function executeAddImageNode(src?: string) {
-		// const container = getWhiteboardContainer(); // Removed
 		if (!whiteboardInstance) {
 			console.warn('Whiteboard instance not available for adding image node.');
 			return;
@@ -101,48 +110,80 @@
 			return;
 		}
 
-		let imageSrc: string | ArrayBuffer | null =
-			src?.trim() || `https://placehold.co/200x150?text=Image`;
-		if (imageSrc === 'upload' || imageSrc === 'input') {
+		let imageSrcOrAction: string | ArrayBuffer | null =
+			src?.trim() || `https://placehold.co/300x200?text=Image`;
+
+		const addTheNode = (
+			finalImageSrc: string | ArrayBuffer | null,
+			intrinsicWidth?: number,
+			intrinsicHeight?: number
+		) => {
+			// Determine initial size, prioritizing intrinsic size up to a reasonable max, then default
+			const initialWidth = intrinsicWidth
+				? Math.min(intrinsicWidth, 600)
+				: DEFAULT_NODE_WIDTH;
+			const initialHeight = intrinsicHeight
+				? Math.min(intrinsicHeight, 500)
+				: DEFAULT_NODE_HEIGHT;
+
+			const randomX = viewCenter.x - initialWidth / 2 + (Math.random() - 0.5) * 50;
+			const randomY = viewCenter.y - initialHeight / 2 + (Math.random() - 0.5) * 50;
+
+			whiteboardInstance.addNode('image', randomX, randomY, {
+				src: finalImageSrc,
+				alt: 'User Added Image',
+				// Pass intrinsic dimensions as props so ImageNode can set them as attributes
+				// The addNode function in Whiteboard.svelte will use these as initial container size
+				width: initialWidth, // This sets NodeData.width
+				height: initialHeight // This sets NodeData.height
+			});
+			console.log(
+				`Added image node with src: "${
+					finalImageSrc ? finalImageSrc.toString().substring(0, 30) + '...' : 'none'
+				}" at (${randomX.toFixed(0)}, ${randomY.toFixed(0)})`
+			);
+		};
+
+		if (imageSrcOrAction === 'upload' || imageSrcOrAction === 'input') {
 			const fileInput = document.createElement('input');
 			fileInput.type = 'file';
 			fileInput.accept = 'image/*';
 			fileInput.click();
 
 			fileInput.addEventListener('change', (event) => {
-				let file = fileInput.files[0];
+				const file = (event.target as HTMLInputElement).files?.[0];
+				if (!file) return;
 
 				const reader = new FileReader();
 				reader.onload = function (e) {
-					imageSrc = e.target.result;
-					console.log(e.target?.result);
-					const randomX = viewCenter.x + (Math.random() - 0.5) * 200;
-					const randomY = viewCenter.y + (Math.random() - 0.5) * 200;
-
-					whiteboardInstance.addNode('image', randomX, randomY, {
-						src: imageSrc,
-						width: 500,
-                        height: 500,
-						alt: 'User Added Image'
-					});
-					console.log(
-						`Added image node with src: "${imageSrc}" at (${randomX.toFixed(0)}, ${randomY.toFixed(0)})`
-					);
+					const uploadedImageSrc = e.target?.result;
+					if (uploadedImageSrc) {
+						const img = new Image();
+						img.onload = () => {
+							addTheNode(uploadedImageSrc, img.naturalWidth, img.naturalHeight);
+						};
+						img.onerror = () => {
+							// Handle case where browser can read file but not display it as image
+							addTheNode(uploadedImageSrc); // Add with default size
+							console.error('Could not load uploaded file as an image to get dimensions.');
+						};
+						img.src = uploadedImageSrc as string;
+					}
 				};
 				reader.readAsDataURL(file);
 			});
 		} else {
-			const randomX = viewCenter.x + (Math.random() - 0.5) * 200;
-			const randomY = viewCenter.y + (Math.random() - 0.5) * 200;
-
-			whiteboardInstance.addNode('image', randomX, randomY, {
-				src: imageSrc,
-				width: 100,
-				alt: 'User Added Image'
-			});
-			console.log(
-				`Added image node with src: "${imageSrc}" at (${randomX.toFixed(0)}, ${randomY.toFixed(0)})`
-			);
+			// For URL based images, try to get natural dimensions too
+			const img = new Image();
+			img.onload = () => {
+				addTheNode(imageSrcOrAction, img.naturalWidth, img.naturalHeight);
+			};
+			img.onerror = () => {
+				// If image URL fails to load, add with default size
+				console.warn(`Could not load image from URL: ${imageSrcOrAction}. Adding with default size.`);
+				addTheNode(imageSrcOrAction);
+			};
+			img.src = imageSrcOrAction as string;
 		}
 	}
 
@@ -166,9 +207,6 @@
 
 		whiteboardInstance.setZoom(targetZoom);
 
-		// The log now reflects the targetZoom. Whiteboard.svelte handles clamping internally.
-		// To get the *actual* new zoom, we'd need whiteboardInstance.getViewport().zoom again after the call.
-		// For simplicity of this change, we'll log the target.
 		console.log(
 			`Zoomed ${direction} by ${factor.toFixed(2)}. Target zoom level: ${targetZoom.toFixed(2)} (actual may be clamped)`
 		);
@@ -189,7 +227,6 @@
 			);
 			return;
 		}
-		// Assuming Whiteboard.svelte keeps its 'nodes' prop in sync
 		console.log('Current Nodes:', JSON.parse(JSON.stringify(nodes)));
 	}
 
@@ -324,7 +361,6 @@
 		if (commandInputRef) {
 			commandInputRef.focus();
 		}
-		// console.log("Type 'help' in the command bar below for available commands."); // Initial prompt
 	});
 </script>
 
@@ -357,8 +393,7 @@
 		margin: 0;
 		padding: 0;
 		height: 100%;
-		font-family:
-			-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif,
+		font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif,
 			'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
 		overflow: hidden;
 	}
@@ -372,7 +407,6 @@
 	.whiteboard-wrapper {
 		flex-grow: 1;
 		min-height: 0;
-		/* border-top: 1px solid #ccc; No longer needed with app background */
 		position: relative;
 		transition: filter 0.3s ease-in-out;
 	}
