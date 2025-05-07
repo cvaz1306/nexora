@@ -4,6 +4,7 @@
 	export let placeholder: string = "Type command and press Enter";
 	export let disabled: boolean = false;
 
+    export let focused = false;
 	let commandInput: string = '';
 	let commandInputRef: HTMLInputElement;
 
@@ -42,6 +43,8 @@
 		type="text"
 		bind:this={commandInputRef}
 		bind:value={commandInput}
+        on:focusin={() => focused = true}
+		on:focusout={() => focused = false}
 		on:keydown={handleCommandInput}
 		{placeholder}
 		aria-label="Command Input"

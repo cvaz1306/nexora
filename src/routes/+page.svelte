@@ -78,7 +78,7 @@
 			console.error("Whiteboard instance not ready onMount. This shouldn't happen with bind:this.");
 		}
 		document.addEventListener('keypress', (event) => {
-			if(event.key === '/' || event.key === '.') {
+			if(event.key === '/' || event.key === ':') {
 				commandBarComponent.focus();
 			}
 	});
