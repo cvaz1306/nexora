@@ -1,38 +1,51 @@
-# sv
+# Svelte Interactive Whiteboard
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A simple interactive whiteboard application built with SvelteKit. This project demonstrates how to create a pannable, zoomable canvas where users can add, move, and resize different types of nodes (currently text and images).
 
-## Creating a project
+## Key Features
 
-If you're seeing this, you've probably already done this step. Congrats!
+*   **Infinite Canvas:** Pan and zoom smoothly around the whiteboard space.
+*   **Node Types:** Add Text and Image nodes.
+*   **Interactions:**
+    *   Select nodes by clicking.
+    *   Drag selected nodes to reposition them.
+    *   Resize selected nodes using corner/side handles.
+*   **Command-Line Interface:** Control the whiteboard via text commands entered in a bar at the bottom (e.g., `add text "Note"`, `add image upload`, `zoom in`).
+*   **Help Modal:** Type `help` in the command bar to see available commands.
+*   **Grid Background:** A dynamic grid visualizes the canvas space.
+*   **TypeScript:** Built with TypeScript for type safety.
+*   **Pointer Events:** Uses the Pointer Events API for unified mouse and touch input.
 
-```bash
-# create a new project in the current directory
-npx sv create
+## Technology Stack
 
-# create a new project in my-app
-npx sv create my-app
-```
+*   [SvelteKit](https://kit.svelte.dev/)
+*   [Svelte 5](https://svelte.dev/)
+*   [TypeScript](https://www.typescriptlang.org/)
+*   HTML / CSS
 
-## Developing
+## Getting Started
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository-url>
+    cd <repository-folder>
+    ```
+2.  **Install dependencies:**
+    ```bash
+    npm install
+    # or yarn install or pnpm install
+    ```
+3.  **Run the development server:**
+    ```bash
+    npm run dev -- --open
+    ```
+    This will start the Vite development server and open the application in your default browser, typically at `http://localhost:5173`.
 
-```bash
-npm run dev
+## Usage
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```bash
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+*   **Pan:** Click and drag the empty whiteboard background.
+*   **Zoom:** Use the mouse wheel while hovering over the whiteboard.
+*   **Select Node:** Click on a node.
+*   **Drag Node:** Click and drag a selected node.
+*   **Resize Node:** Click and drag the handles that appear around a selected node.
+*   **Command Bar:** Type commands (like `help`, `add text ...`, `add image ...`, `zoom in`, `reset`) into the input field at the bottom and press Enter.
