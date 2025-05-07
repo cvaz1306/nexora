@@ -129,7 +129,11 @@
 
 		if (event.button !== 0) return; // Only handle left clicks
 
-		if (resizeHandle && nodeWrapper && selectedNodeId === nodeWrapper.getAttribute('data-node-id')) {
+		if (
+			resizeHandle &&
+			nodeWrapper &&
+			selectedNodeId === nodeWrapper.getAttribute('data-node-id')
+		) {
 			// --- Node Resize Start ---
 			event.stopPropagation(); // Prevent whiteboard panning/node dragging
 
@@ -481,8 +485,12 @@
 						<div
 							class="resize-handle resize-handle-{handle}"
 							data-resize-handle={handle}
-							on:pointerdown|stopPropagation={() => {}}
-							aria-label="Resize node {handle.replace('t', 'top ').replace('b', 'bottom ').replace('l', 'left ').replace('r', 'right ').trim()}"
+							aria-label="Resize node {handle
+								.replace('t', 'top ')
+								.replace('b', 'bottom ')
+								.replace('l', 'left ')
+								.replace('r', 'right ')
+								.trim()}"
 						></div>
 					{/each}
 				{/if}
@@ -508,7 +516,8 @@
 		/* transform-origin: 0 0; Set in style attribute */
 		will-change: transform, background-position; /* Performance hint */
 		/* Dynamic Grid Background */
-		background-image: linear-gradient(to right, #e9ecef 1px, transparent 1px),
+		background-image:
+			linear-gradient(to right, #e9ecef 1px, transparent 1px),
 			/* Grid line color */ linear-gradient(to bottom, #e9ecef 1px, transparent 1px);
 		/* background-size and background-position are set dynamically via style attribute */
 	}
@@ -516,7 +525,9 @@
 	.node-wrapper {
 		/* Base node wrapper styles */
 		/* Add transition for smoother selection outline appearance/disappearance */
-		transition: outline-color 0.15s ease-in-out, outline-width 0.15s ease-in-out;
+		transition:
+			outline-color 0.15s ease-in-out,
+			outline-width 0.15s ease-in-out;
 		outline: 2px solid transparent; /* Reserve space for outline */
 		outline-offset: 3px;
 		z-index: 1; /* Base z-index */
