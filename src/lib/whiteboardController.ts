@@ -39,8 +39,12 @@ export class WhiteboardController {
 		const randomX = viewCenter.x - DEFAULT_NODE_WIDTH / 2 + (Math.random() - 0.5) * 50;
 		const randomY = viewCenter.y - DEFAULT_NODE_HEIGHT / 2 + (Math.random() - 0.5) * 50;
 		const nodeText = text?.trim() || `Random ${Math.random().toString(36).substring(7)}`;
+		
+		const nodes = this.getNodesState();
+		const showIdForNewNode = nodes.length > 0 ? nodes[0].showId : false;
 
-		this.whiteboard.addNode('text', randomX, randomY, { text: nodeText, fontSize: 16 });
+
+		this.whiteboard.addNode('text', randomX, randomY, { text: nodeText, fontSize: 16, showId: showIdForNewNode });
 		console.log(`Added text node: "${nodeText}" at (${randomX.toFixed(0)}, ${randomY.toFixed(0)})`);
 	}
 
@@ -59,6 +63,9 @@ export class WhiteboardController {
 
 		let imageSrcOrAction: string | ArrayBuffer | null =
 			src?.trim() || `https://placehold.co/300x200?text=Image`;
+		
+		const nodes = this.getNodesState();
+		const showIdForNewNode = nodes.length > 0 ? nodes[0].showId : false;
 
 		const addTheNode = (
 			finalImageSrc: string | ArrayBuffer | null,
@@ -79,7 +86,8 @@ export class WhiteboardController {
 				src: finalImageSrc,
 				alt: 'User Added Image',
 				width: initialWidth,
-				height: initialHeight
+				height: initialHeight,
+				showId: showIdForNewNode
 			});
 			console.log(
 				`Added image node with src: "${
@@ -143,22 +151,30 @@ export class WhiteboardController {
 		);
 	}
 
-	public setZoom(targetStr?: string): void {
+	public setZoom(targetZoomLevel?: number | string): void { // Made parameter optional and accept string
 		if (!this.whiteboard) {
 			console.warn('Whiteboard instance not available for zoom.');
 			return;
 		}
-		let target = parseFloat(targetStr || '1');
-		if (isNaN(target) || target <= 0.1 || target > 5) {
+		let target: number;
+		if (typeof targetZoomLevel === 'string') {
+			target = parseFloat(targetZoomLevel);
+		} else if (typeof targetZoomLevel === 'number') {
+			target = targetZoomLevel;
+		} else {
+			target = 1; // Default if undefined
+		}
+
+		if (isNaN(target) || target <= 0 || target > 10) { // Adjusted max zoom for direct set
 			console.warn(
-				`Invalid zoom target "${targetStr}". Using default 1. Target must be > 0.1 and < 5.`
+				`Invalid zoom target "${targetZoomLevel}". Using default 1. Target must be > 0 and <= 10.`
 			);
 			target = 1;
 		}
 
 		this.whiteboard.setZoom(target);
 		console.log(
-			`Zoomed to ${target.toFixed(2)}. Target zoom level: ${target.toFixed(2)} (actual may be clamped)`
+			`Zoom set to ${target.toFixed(2)}. (actual may be clamped by whiteboard min/max)`
 		);
 	}
 
@@ -179,13 +195,17 @@ export class WhiteboardController {
 		this.whiteboard.panBy(x, y);
 		console.log(`Panned by (${x.toFixed(0)}, ${y.toFixed(0)})`);
 	}
+
 	public toggleIDHidden(): void {
 		let nodes = this.getNodesState();
+		// Determine the new state based on the first node, or toggle to true if no nodes/all hidden
+		const newShowIdState = nodes.length > 0 ? !nodes[0].showId : true;
 		nodes = nodes.map((node) => ({
 			...node,
-			showId: !node.showId
+			showId: newShowIdState
 		}));
 		this.setNodesState(nodes);
+		console.log(`Node IDs visibility toggled to: ${newShowIdState}`);
 	}
 
 	public resetView(): void {
@@ -196,10 +216,10 @@ export class WhiteboardController {
 	}
 
 	public logNodes(): void {
-		if (!this.whiteboard) { // Check whiteboard instance directly for readiness
+		if (!this.whiteboard) {
 			console.log(
 				'Current Nodes (whiteboard not fully initialized yet):',
-				JSON.parse(JSON.stringify(this.getNodesState())) // Use getNodesState for initial nodes
+				JSON.parse(JSON.stringify(this.getNodesState()))
 			);
 			return;
 		}
@@ -207,9 +227,93 @@ export class WhiteboardController {
 	}
 
 	public clearNodes(): void {
-		this.setNodesState([]); // This updates the reactive 'nodes' in +page.svelte
+		this.setNodesState([]);
 		console.log('All nodes cleared from the whiteboard.');
 	}
+
+	public autoArrangeNodes(paddingInput?: number | string ): void {
+		const currentNodes = this.getNodesState();
+		if (currentNodes.length === 0) {
+			console.log('No nodes to arrange.');
+			return;
+		}
+
+		const padding = typeof paddingInput === 'string' ? parseInt(paddingInput, 10) : (typeof paddingInput === 'number' ? paddingInput : 30);
+		if (isNaN(padding)) {
+			console.warn(`Invalid padding for arrange: "${paddingInput}". Using default 30.`);
+			// Use default padding if parsing failed
+		}
+
+
+		const arrangedNodes: NodeData[] = [];
+		let currentX = padding;
+		let currentY = padding;
+		let maxHeightInRow = 0;
+		const MAX_COLS = Math.max(1, Math.floor(Math.sqrt(currentNodes.length) * 1.2)) // Dynamic cols
+		// const MAX_COLS = 4; // Fixed columns if preferred
+
+
+		currentNodes.slice().sort((a,b) => a.id.localeCompare(b.id)).forEach((node, index) => { // Sort for deterministic layout
+			const newNode = { ...node };
+
+			if (index > 0 && index % MAX_COLS === 0) {
+				currentX = padding;
+				currentY += maxHeightInRow + padding;
+				maxHeightInRow = 0;
+			}
+
+			newNode.x = currentX;
+			newNode.y = currentY;
+
+			currentX += newNode.width + padding;
+			maxHeightInRow = Math.max(maxHeightInRow, newNode.height);
+
+			arrangedNodes.push(newNode);
+		});
+
+		this.setNodesState(arrangedNodes);
+		console.log(`Auto-arranged ${arrangedNodes.length} nodes into a grid.`);
+		// Optionally, after arranging, fit view to content
+		// this.fitViewToNodes(arrangedNodes, padding);
+	}
+
+	// Optional: Helper to fit view after arranging (complex, can be added later)
+	/*
+	public fitViewToNodes(nodesToFit: NodeData[], padding: number = 50): void {
+		if (!this.whiteboard || nodesToFit.length === 0) return;
+
+		let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+		nodesToFit.forEach(node => {
+			minX = Math.min(minX, node.x);
+			minY = Math.min(minY, node.y);
+			maxX = Math.max(maxX, node.x + node.width);
+			maxY = Math.max(maxY, node.y + node.height);
+		});
+
+		const contentWidth = maxX - minX;
+		const contentHeight = maxY - minY;
+		if (contentWidth <= 0 || contentHeight <= 0) {
+			this.resetView();
+			return;
+		}
+
+		const viewPort = this.whiteboard.getViewport(); // Assume this returns screen width/height
+		// This part is tricky: getViewport() returns pan/zoom. Need container dimensions.
+		// For now, we'd need Whiteboard to expose its clientWidth/Height or pass them.
+		// This is a placeholder for a more complex fit-to-view logic.
+		// const screenWidth = ???;
+		// const screenHeight = ???;
+		// const zoomX = (screenWidth - 2 * padding) / contentWidth;
+		// const zoomY = (screenHeight - 2 * padding) / contentHeight;
+		// const newZoom = Math.min(zoomX, zoomY, this.whiteboard.maxZoom);
+		// this.whiteboard.setZoom(newZoom);
+		// const centerX = minX + contentWidth / 2;
+		// const centerY = minY + contentHeight / 2;
+		// this.whiteboard.panTo(centerX, centerY);
+
+		console.log("Fit view to nodes (basic implementation needed).")
+	}
+	*/
 
 	public isReady(): boolean {
 		return !!this.whiteboard;

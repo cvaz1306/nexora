@@ -64,53 +64,79 @@ export class CommandInterpreter {
 				break;
 			case 'zoom':
 				if (params.length < 1) {
-					console.warn('Usage: zoom <in|out> [factor]');
+					// If just 'zoom', could show current zoom or treat as help for zoom
+					console.warn("Usage: zoom <in|out|value> [factor]. E.g., 'zoom in', 'zoom 0.5'");
 					this.showHelpCallback();
 					return;
 				}
-				if (params[0]?.toLowerCase() === 'in') {
+				const zoomAction = params[0]?.toLowerCase();
+				if (zoomAction === 'in') {
 					this.controller.zoom('in', params[1]);
-				} else if (params[0]?.toLowerCase() === 'out') {
+				} else if (zoomAction === 'out') {
 					this.controller.zoom('out', params[1]);
 				} else {
-					console.warn(`Unknown 'zoom' subcommand: "${params[0]}". Try 'zoom in' or 'zoom out'.`);
-					this.showHelpCallback();
+					// Try to interpret as a direct zoom level
+					const zoomLevel = parseFloat(zoomAction);
+					if (!isNaN(zoomLevel)) {
+						this.controller.setZoom(zoomLevel);
+					} else {
+						console.warn(`Unknown 'zoom' action: "${params[0]}". Try 'zoom in', 'zoom out', or a number.`);
+						this.showHelpCallback();
+					}
 				}
 				break;
-			case 'zoomin':
+			case 'zoomin': // Alias
 				this.controller.zoom('in', params[0]);
 				break;
-			case 'zoomout':
+			case 'zoomout': // Alias
 				this.controller.zoom('out', params[0]);
 				break;
 			case 'set':
-				console.log(params)
-				console.log(parts)
+				if (params.length < 1) {
+					console.warn("Usage: set <property> <value>. E.g., 'set zoom 0.8', 'set pan 100 100', 'set sid'");
+					this.showHelpCallback();
+					return;
+				}
 				switch (params[0]?.toLowerCase()) {
 					case 'zoom':
-						this.controller.setZoom(parseFloat(params[1]));
+						this.controller.setZoom(params[1]); // Pass string, controller handles parsing
 						break;
 					case 'pan':
-						this.controller.panTo(parseFloat(params[1]), parseFloat(params[2]));
+						const x = parseFloat(params[1]);
+						const y = parseFloat(params[2]);
+						if (!isNaN(x) && !isNaN(y)) {
+							this.controller.panTo(x, y);
+						} else {
+							console.warn("Invalid pan coordinates. Usage: set pan <x> <y>");
+							this.showHelpCallback();
+						}
 						break;
-					case 'sid':
-						this.controller.toggleIDHidden()
-						console.log("Toggled ID visibility")
+					case 'sid': // Toggle Show ID
+						this.controller.toggleIDHidden();
 						break;
 					default:
-						console.warn(`Unknown 'set' subcommand: "${params[0]}". Try 'set zoom' or 'set pan'.`);
+						console.warn(`Unknown 'set' subcommand: "${params[0]}". Try 'set zoom', 'set pan', or 'set sid'.`);
 						this.showHelpCallback();
 				}
+				break; // Added missing break for 'set' case
 			case 'reset':
+			case 'resetview': // Alias
 				this.controller.resetView();
 				break;
 			case 'log':
+			case 'ls': // Alias
 				this.controller.logNodes();
 				break;
 			case 'clear':
+			case 'cls': // Alias
 				this.controller.clearNodes();
 				break;
+			case 'arrange':
+			case 'layout':
+				this.controller.autoArrangeNodes(params[0]); // Pass optional padding string
+				break;
 			case 'help':
+			case '?': // Alias
 				this.showHelpCallback();
 				break;
 			default:

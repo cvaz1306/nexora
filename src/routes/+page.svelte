@@ -40,18 +40,23 @@
 
 	const helpContent = `
 <strong>help</strong>                          - Shows this help message.
-<strong>add text</strong> <em>[content]</em>         - Adds a text node.
-                                  e.g., <strong>add text</strong> <em>"Hello World"</em>
-                                  e.g., <strong>text</strong> <em>Quick note</em> (shorthand)
-<strong>add image</strong> <em>[url|upload]</em>    - Adds an image node.
-                                  e.g., <strong>add image</strong> <em>https://svelte.dev/favicon.png</em>
-                                  e.g., <strong>image</strong> <em>upload</em> (opens file dialog)
-<strong>zoom in</strong> <em>[factor]</em>             - Zooms in. Default factor: 1.2.
-<strong>zoom out</strong> <em>[factor]</em>            - Zooms out. Default factor: 1.2.
-<strong>reset</strong>                           - Resets pan to (0,0) and zoom to 1x.
-<strong>log</strong>                             - Logs current nodes to the browser console.
-<strong>clear</strong>                           - Clears all nodes from the whiteboard.
-    `; // Simplified example, keep your full help content
+<strong>add text</strong> <em>[content]</em>         - Adds a text node. (alias: <strong>text</strong>)
+                                  e.g., <strong>add text</strong> <em>"Hello"</em>
+<strong>add image</strong> <em>[url|upload]</em>    - Adds an image node. (alias: <strong>image</strong>)
+                                  e.g., <strong>image</strong> <em>upload</em>
+<strong>zoom</strong> <em>[in|out|level] [factor]</em> - Zooms. e.g. <strong>zoom in</strong>, <strong>zoom 0.5</strong>
+                                  (aliases: <strong>zoomin</strong>, <strong>zoomout</strong>)
+<strong>set zoom</strong> <em>[level]</em>             - Sets zoom to a specific level.
+                                  e.g., <strong>set zoom</strong> <em>0.75</em>
+<strong>set pan</strong> <em>[x] [y]</em>              - Pans view to center on (x,y).
+                                  e.g., <strong>set pan</strong> <em>0 0</em>
+<strong>set sid</strong>                       - Toggles visibility of node IDs.
+<strong>reset</strong>                           - Resets pan to (0,0) and zoom to 1x. (alias: <strong>resetview</strong>)
+<strong>arrange</strong> <em>[padding]</em>           - Arranges nodes in a grid. (alias: <strong>layout</strong>)
+                                  e.g., <strong>arrange</strong> <em>50</em>
+<strong>log</strong>                             - Logs current nodes to console. (alias: <strong>ls</strong>)
+<strong>clear</strong>                           - Clears all nodes. (alias: <strong>cls</strong>)
+    `;
 
 	let controller: WhiteboardController;
 	let interpreter: CommandInterpreter;
