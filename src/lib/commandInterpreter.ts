@@ -83,6 +83,24 @@ export class CommandInterpreter {
 			case 'zoomout':
 				this.controller.zoom('out', params[0]);
 				break;
+			case 'set':
+				console.log(params)
+				console.log(parts)
+				switch (params[0]?.toLowerCase()) {
+					case 'zoom':
+						this.controller.setZoom(parseFloat(params[1]));
+						break;
+					case 'pan':
+						this.controller.panTo(parseFloat(params[1]), parseFloat(params[2]));
+						break;
+					case 'sid':
+						this.controller.toggleIDHidden()
+						console.log("Toggled ID visibility")
+						break;
+					default:
+						console.warn(`Unknown 'set' subcommand: "${params[0]}". Try 'set zoom' or 'set pan'.`);
+						this.showHelpCallback();
+				}
 			case 'reset':
 				this.controller.resetView();
 				break;

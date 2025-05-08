@@ -6,9 +6,11 @@
 	// `width` and `height` props from NodeData.props can be accessed via $$props
 	// if needed for img attributes, e.g. $$props.width
 	export let image: HTMLImageElement | undefined = undefined; // Make binding optional
+	export let showId: boolean = false;
+	export let id: string;
 </script>
 
-<BaseNode>
+<BaseNode {showId} {id}>
 	<img
 		bind:this={image}
 		{src}

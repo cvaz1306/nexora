@@ -143,6 +143,51 @@ export class WhiteboardController {
 		);
 	}
 
+	public setZoom(targetStr?: string): void {
+		if (!this.whiteboard) {
+			console.warn('Whiteboard instance not available for zoom.');
+			return;
+		}
+		let target = parseFloat(targetStr || '1');
+		if (isNaN(target) || target <= 0.1 || target > 5) {
+			console.warn(
+				`Invalid zoom target "${targetStr}". Using default 1. Target must be > 0.1 and < 5.`
+			);
+			target = 1;
+		}
+
+		this.whiteboard.setZoom(target);
+		console.log(
+			`Zoomed to ${target.toFixed(2)}. Target zoom level: ${target.toFixed(2)} (actual may be clamped)`
+		);
+	}
+
+	public panTo(x: number, y: number): void {
+		if (!this.whiteboard) {
+			console.warn('Whiteboard instance not available for pan.');
+			return;
+		}
+		this.whiteboard.panTo(x, y);
+		console.log(`Panned to (${x.toFixed(0)}, ${y.toFixed(0)})`);
+	}
+
+	public panBy(x: number, y: number): void {
+		if (!this.whiteboard) {
+			console.warn('Whiteboard instance not available for pan.');
+			return;
+		}
+		this.whiteboard.panBy(x, y);
+		console.log(`Panned by (${x.toFixed(0)}, ${y.toFixed(0)})`);
+	}
+	public toggleIDHidden(): void {
+		let nodes = this.getNodesState();
+		nodes = nodes.map((node) => ({
+			...node,
+			showId: !node.showId
+		}));
+		this.setNodesState(nodes);
+	}
+
 	public resetView(): void {
 		if (!this.whiteboard) return;
 		this.whiteboard.panTo(0, 0);

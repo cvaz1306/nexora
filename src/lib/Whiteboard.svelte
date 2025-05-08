@@ -3,6 +3,7 @@
 
 	export type NodeData = {
 		id: string;
+		showId: boolean;
 		component: ComponentType<SvelteComponent>;
 		x: number; // Position on the whiteboard (unscaled stage coords)
 		y: number; // Position on the whiteboard (unscaled stage coords)
@@ -13,6 +14,7 @@
 </script>
 
 <script lang="ts">
+	export let nodes: NodeData[] = [];
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { browser } from '$app/environment';
 	// import type { ComponentType, SvelteComponent } from 'svelte';
@@ -22,7 +24,6 @@
 	import TextNode from './TextNode.svelte';
 
 	// --- Exports ---
-	export let nodes: NodeData[] = [];
 	export let minZoom = 0.1;
 	export let maxZoom = 5.0;
 	export let zoomSensitivity = 0.002;
@@ -477,7 +478,8 @@
 				<svelte:component
 					this={node.component}
 					isSelected={node.id === selectedNodeId}
-					nodeId={node.id}
+					id={node.id}
+					showId={node.showId}
 					{...node.props}
 				/>
 				{#if node.id === selectedNodeId}

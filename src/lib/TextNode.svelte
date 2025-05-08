@@ -20,9 +20,11 @@
 	onMount(() => {
 		initialText = text;
 	});
-</script>
 
-<BaseNode>
+	export let showId: boolean = false;
+	export let id: string;
+</script>
+<BaseNode {showId} {id}>
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		bind:this={element}

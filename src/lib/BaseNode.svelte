@@ -1,19 +1,35 @@
 <script lang="ts">
-	// No props needed for x, y, width, height if it always fills parent
-	// Parent (.node-wrapper) is positioned and sized by Whiteboard.svelte
+	export let showId: boolean = false;
+	export let id: string;
+
+	let idWrapper: HTMLDivElement;
 </script>
 
-<div class="node-base">
-	<slot />
+<div class="node-base-wrapper">
+	<div bind:this={idWrapper}>
+		{#if showId}
+			{id}
+		{/if}
+	</div>
+	<div class="node-base" style="height: {showId ? `calc(100% - ${idWrapper.offsetHeight}px)` : '100%'};">
+		<slot />
+	</div>
 </div>
 
 <style>
-	.node-base {
+	.node-base-wrapper {
 		width: 100%; /* Fill the parent (.node-wrapper) */
 		height: 100%; /* Fill the parent (.node-wrapper) */
 		border: 1px solid #ccc;
+		border-radius: 15px;
 		background-color: white;
 		box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+		user-select: none; /* Prevent selecting node content when panning board */
+	}
+	.node-base {
+		width: 100%; /* Fill the parent (.node-wrapper) */
+
+		background-color: white;
 		user-select: none; /* Prevent selecting node content when panning board */
 		display: flex; /* Useful for internal layout */
 		align-items: center;
