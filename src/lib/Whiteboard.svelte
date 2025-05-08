@@ -3,13 +3,13 @@
 
 	export type NodeData = {
 		id: string;
-		showId: boolean; // Existing property, ensure it's present
+		showId: boolean;
 		component: ComponentType<SvelteComponent>;
-		x: number; // Position on the whiteboard (unscaled stage coords)
-		y: number; // Position on the whiteboard (unscaled stage coords)
+		x: number;
+		y: number;
 		props: Record<string, any>;
-		width: number; // Node width in stage units
-		height: number; // Node height in stage units
+		width: number;
+		height: number;
 	};
 </script>
 
@@ -30,10 +30,15 @@
 	const DEFAULT_NODE_HEIGHT = 150;
 	const MIN_NODE_WIDTH = 30;
 	const MIN_NODE_HEIGHT = 30;
-	const SNAP_THRESHOLD_STAGE = 7; // Snap sensitivity in stage units
-
+	let SNAP_THRESHOLD_STAGE = 8;
+	
 	let panX = 0;
 	let panY = 0;
+	
+	let pointerVelX = 0;
+	let pointerVelY = 0;
+	// $: SNAP_THRESHOLD_STAGE = 8 / (Math.sqrt(pointerVelX * pointerVelX + pointerVelY * pointerVelY)/3); // Snap sensitivity in stage units (increased slightly)
+
 	let zoom = 1;
 	let isPanning = false;
 	let startPanX = 0;
@@ -61,12 +66,11 @@
 
 	let selectedNodeId: string | null = null;
 
-	// Snapping state
 	let activeSnapLines: Array<{
 		type: 'h' | 'v';
-		stageValue: number; // X for vertical, Y for horizontal
-		start: number;      // Y1 for vertical, X1 for horizontal
-		end: number;        // Y2 for vertical, X2 for horizontal
+		stageValue: number;
+		start: number;
+		end: number;
 	}> = [];
 
 	$: backgroundSize = gridSpacing * zoom;
@@ -79,286 +83,227 @@
       background-position: ${backgroundPositionX}px ${backgroundPositionY}px;
     `;
 
-	function getMousePosition(event: MouseEvent | WheelEvent | PointerEvent): {
-		x: number;
-		y: number;
-	} {
+	function getMousePosition(event: MouseEvent | WheelEvent | PointerEvent): { x: number; y: number; } {
 		if (!containerElement) return { x: 0, y: 0 };
 		const rect = containerElement.getBoundingClientRect();
-		return {
-			x: event.clientX - rect.left,
-			y: event.clientY - rect.top
-		};
+		return { x: event.clientX - rect.left, y: event.clientY - rect.top };
 	}
 
 	function screenToStageCoordinates(screenX: number, screenY: number): { x: number; y: number } {
-		return {
-			x: (screenX - panX) / zoom,
-			y: (screenY - panY) / zoom
-		};
+		return { x: (screenX - panX) / zoom, y: (screenY - panY) / zoom };
 	}
 
-	// function stageToScreenCoordinates(stageX: number, stageY: number): { x: number; y: number } {
-	// 	return {
-	// 		x: stageX * zoom + panX,
-	// 		y: stageY * zoom + panY
-	// 	};
-	// }
-
 	export function getStageCoordinatesForScreenCenter(): { x: number; y: number } | null {
-		if (!containerElement) {
-			console.warn('Whiteboard.getStageCoordinatesForScreenCenter: containerElement not ready.');
-			return null;
-		}
-		return screenToStageCoordinates(
-			containerElement.clientWidth / 2,
-			containerElement.clientHeight / 2
-		);
+		if (!containerElement) return null;
+		return screenToStageCoordinates(containerElement.clientWidth / 2, containerElement.clientHeight / 2);
 	}
 
 	// --- Snapping Logic ---
 	function calculateAndApplySnapsForDrag(
-        activeNodeId: string,
-        tentativeX: number,
-        tentativeY: number
-    ): { newX: number; newY: number } {
-        const activeNode = nodes.find(n => n.id === activeNodeId);
-        if (!activeNode) return { newX: tentativeX, newY: tentativeY };
-
-        activeSnapLines = []; // Clear previous lines
-        let finalX = tentativeX;
-        let finalY = tentativeY;
-
-        let minDeltaX = SNAP_THRESHOLD_STAGE / zoom; // Convert to screen pixels for comparison consistency, or keep all in stage
-        let targetSnapX: number | null = null;
-		let xSnapSourceStaticNode: NodeData | null = null;
-
-
-        let minDeltaY = SNAP_THRESHOLD_STAGE / zoom;
-        let targetSnapY: number | null = null;
-		let ySnapSourceStaticNode: NodeData | null = null;
-
-        const activePoints = {
-            left: tentativeX,
-            cx: tentativeX + activeNode.width / 2,
-            right: tentativeX + activeNode.width,
-            top: tentativeY,
-            cy: tentativeY + activeNode.height / 2,
-            bottom: tentativeY + activeNode.height,
-        };
-
-        for (const staticNode of nodes) {
-            if (staticNode.id === activeNodeId) continue;
-
-            const staticPoints = {
-                left: staticNode.x,
-                cx: staticNode.x + staticNode.width / 2,
-                right: staticNode.x + staticNode.width,
-                top: staticNode.y,
-                cy: staticNode.y + staticNode.height / 2,
-                bottom: staticNode.y + staticNode.height,
-            };
-
-            const xComparisons = [
-                { active: activePoints.left, static: staticPoints.left, offset: 0 },
-                { active: activePoints.left, static: staticPoints.cx, offset: 0 },
-                { active: activePoints.left, static: staticPoints.right, offset: 0 },
-                { active: activePoints.cx, static: staticPoints.left, offset: -activeNode.width / 2 },
-                { active: activePoints.cx, static: staticPoints.cx, offset: -activeNode.width / 2 },
-                { active: activePoints.cx, static: staticPoints.right, offset: -activeNode.width / 2 },
-                { active: activePoints.right, static: staticPoints.left, offset: -activeNode.width },
-                { active: activePoints.right, static: staticPoints.cx, offset: -activeNode.width },
-                { active: activePoints.right, static: staticPoints.right, offset: -activeNode.width },
-            ];
-
-            for (const comp of xComparisons) {
-                const delta = Math.abs(comp.active - comp.static);
-                if (delta < minDeltaX) {
-                    minDeltaX = delta;
-                    targetSnapX = comp.static + comp.offset;
-					xSnapSourceStaticNode = staticNode;
-                }
-            }
-
-            const yComparisons = [
-                { active: activePoints.top, static: staticPoints.top, offset: 0 },
-                { active: activePoints.top, static: staticPoints.cy, offset: 0 },
-                { active: activePoints.top, static: staticPoints.bottom, offset: 0 },
-                { active: activePoints.cy, static: staticPoints.top, offset: -activeNode.height / 2 },
-                { active: activePoints.cy, static: staticPoints.cy, offset: -activeNode.height / 2 },
-                { active: activePoints.cy, static: staticPoints.bottom, offset: -activeNode.height / 2 },
-                { active: activePoints.bottom, static: staticPoints.top, offset: -activeNode.height },
-                { active: activePoints.bottom, static: staticPoints.cy, offset: -activeNode.height },
-                { active: activePoints.bottom, static: staticPoints.bottom, offset: -activeNode.height },
-            ];
-            for (const comp of yComparisons) {
-                const delta = Math.abs(comp.active - comp.static);
-                if (delta < minDeltaY) {
-                    minDeltaY = delta;
-                    targetSnapY = comp.static + comp.offset;
-					ySnapSourceStaticNode = staticNode;
-                }
-            }
-        }
-
-        if (targetSnapX !== null && xSnapSourceStaticNode) {
-            finalX = targetSnapX;
-            activeSnapLines.push({
-                type: 'v',
-                stageValue: finalX + (activePoints.left - tentativeX), // The line is at the static node's edge usually
-                start: Math.min(activePoints.top, xSnapSourceStaticNode.y),
-                end: Math.max(activePoints.bottom, xSnapSourceStaticNode.y + xSnapSourceStaticNode.height),
-            });
-        }
-        if (targetSnapY !== null && ySnapSourceStaticNode) {
-            finalY = targetSnapY;
-            activeSnapLines.push({
-                type: 'h',
-                stageValue: finalY + (activePoints.top - tentativeY),
-                start: Math.min(activePoints.left, ySnapSourceStaticNode.x),
-                end: Math.max(activePoints.right, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width),
-            });
-        }
-		// Re-calculate line position based on which edge of active node snapped to which edge of static node
-		if (targetSnapX !== null && xSnapSourceStaticNode) {
-			let lineXPos = 0;
-			// Find which static point caused the snap
-			const xComp = [
-                { activeVal: activeNode.x, staticVal: xSnapSourceStaticNode.x, finalActivePos: finalX}, // L-L
-				{ activeVal: activeNode.x, staticVal: xSnapSourceStaticNode.x + xSnapSourceStaticNode.width/2, finalActivePos: finalX}, // L-C
-				{ activeVal: activeNode.x, staticVal: xSnapSourceStaticNode.x + xSnapSourceStaticNode.width, finalActivePos: finalX}, // L-R
-				{ activeVal: activeNode.x + activeNode.width/2, staticVal: xSnapSourceStaticNode.x, finalActivePos: finalX + activeNode.width/2}, // C-L
-				{ activeVal: activeNode.x + activeNode.width/2, staticVal: xSnapSourceStaticNode.x + xSnapSourceStaticNode.width/2, finalActivePos: finalX + activeNode.width/2}, // C-C
-				// ... etc. The line should be ON the static node's edge/center.
-            ].find(c => Math.abs((c.finalActivePos) - c.staticVal) < SNAP_THRESHOLD_STAGE / zoom);
-			lineXPos = xComp ? xComp.staticVal : (finalX + (activePoints.left - tentativeX)); // Fallback
-
-			activeSnapLines = activeSnapLines.filter(l => l.type !== 'v'); // remove old
-			activeSnapLines.push({
-                type: 'v',
-                stageValue: lineXPos,
-                start: Math.min(finalY, xSnapSourceStaticNode.y), // use finalY from Y-snap
-                end: Math.max(finalY + activeNode.height, xSnapSourceStaticNode.y + xSnapSourceStaticNode.height),
-            });
-		}
-		if (targetSnapY !== null && ySnapSourceStaticNode) {
-			let lineYPos = 0;
-			const yComp = [
-                { activeVal: activeNode.y, staticVal: ySnapSourceStaticNode.y, finalActivePos: finalY},
-                // ... etc
-            ].find(c => Math.abs((c.finalActivePos) - c.staticVal) < SNAP_THRESHOLD_STAGE / zoom);
-			lineYPos = yComp ? yComp.staticVal : (finalY + (activePoints.top - tentativeY));
-
-			activeSnapLines = activeSnapLines.filter(l => l.type !== 'h'); // remove old
-			activeSnapLines.push({
-                type: 'h',
-                stageValue: lineYPos,
-                start: Math.min(finalX, ySnapSourceStaticNode.x), // use finalX from X-snap
-                end: Math.max(finalX + activeNode.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width),
-            });
-		}
-
-
-        return { newX: finalX, newY: finalY };
-    }
-
-	function calculateAndApplySnapsForResize(
 		activeNodeId: string,
-		tentative: { x: number; y: number; width: number; height: number },
-		handle: ResizeHandleType
-	): { newX: number; newY: number; newWidth: number; newHeight: number } {
-		activeSnapLines = [];
-		let res = { ...tentative };
-		const staticNodes = nodes.filter(n => n.id !== activeNodeId);
+		tentativeX: number, // The node's desired X based on mouse movement
+		tentativeY: number  // The node's desired Y based on mouse movement
+	): { newX: number; newY: number } {
+		const activeNode = nodes.find(n => n.id === activeNodeId);
+		if (!activeNode) return { newX: tentativeX, newY: tentativeY };
+
+		activeSnapLines = []; // Clear previous lines for this move calculation
+		let finalX = tentativeX;
+		let finalY = tentativeY;
 
 		// --- X-Axis Snapping ---
-		let bestDeltaX = SNAP_THRESHOLD_STAGE / zoom;
-		let finalSnapXValue: number | null = null;
-		let xSnapTargetNode: NodeData | null = null;
+		let bestDeltaX = SNAP_THRESHOLD_STAGE;
+		let xSnapTargetStaticEdgeValue: number | null = null; // The X value of the static edge we snap to
+		let xSnapActiveNodeOriginalOffset = 0; // Offset of the active node's snapping edge from its own tentativeX
+		let xSnapSourceStaticNode: NodeData | null = null;
 
-		let activeMovingEdgeX: number;
-		if (handle.includes('l')) activeMovingEdgeX = tentative.x;
-		else if (handle.includes('r')) activeMovingEdgeX = tentative.x + tentative.width;
-		else activeMovingEdgeX = Infinity;
+		// Define edges of the active node based on its tentative position
+		const activeNodePointsX = [
+			{ currentVal: tentativeX, originalOffset: 0 }, // Left edge
+			{ currentVal: tentativeX + activeNode.width / 2, originalOffset: -activeNode.width / 2 }, // Center X
+			{ currentVal: tentativeX + activeNode.width, originalOffset: -activeNode.width }  // Right edge
+		];
 
-		if (activeMovingEdgeX !== Infinity) {
-			for (const staticNode of staticNodes) {
-				const staticEdgesX = [staticNode.x, staticNode.x + staticNode.width / 2, staticNode.x + staticNode.width];
-				for (const staticEdge of staticEdgesX) {
-					const delta = Math.abs(activeMovingEdgeX - staticEdge);
+		for (const staticNode of nodes) {
+			if (staticNode.id === activeNodeId) continue;
+			const staticNodePointsX = [staticNode.x, staticNode.x + staticNode.width / 2, staticNode.x + staticNode.width];
+
+			for (const activeP of activeNodePointsX) {
+				for (const staticP of staticNodePointsX) {
+					const delta = Math.abs(activeP.currentVal - staticP);
 					if (delta < bestDeltaX) {
 						bestDeltaX = delta;
-						finalSnapXValue = staticEdge;
-						xSnapTargetNode = staticNode;
+						xSnapTargetStaticEdgeValue = staticP;
+						xSnapActiveNodeOriginalOffset = activeP.originalOffset;
+						xSnapSourceStaticNode = staticNode;
 					}
 				}
 			}
 		}
 
-		if (finalSnapXValue !== null) {
-			if (handle.includes('l')) {
-				const dx = finalSnapXValue - res.x;
-				if (res.width - dx >= MIN_NODE_WIDTH) { res.x += dx; res.width -= dx; }
-				else { finalSnapXValue = null; }
-			} else if (handle.includes('r')) {
-				const newWidth = finalSnapXValue - res.x;
-				if (newWidth >= MIN_NODE_WIDTH) { res.width = newWidth; }
-				else { finalSnapXValue = null; }
-			}
-			if (finalSnapXValue !== null && xSnapTargetNode) {
-				activeSnapLines.push({
-					type: 'v', stageValue: finalSnapXValue,
-					start: Math.min(res.y, xSnapTargetNode.y),
-					end: Math.max(res.y + res.height, xSnapTargetNode.y + xSnapTargetNode.height)
-				});
-			}
+		if (xSnapTargetStaticEdgeValue !== null) {
+			finalX = xSnapTargetStaticEdgeValue + xSnapActiveNodeOriginalOffset;
 		}
 
 		// --- Y-Axis Snapping ---
-		let bestDeltaY = SNAP_THRESHOLD_STAGE / zoom;
-		let finalSnapYValue: number | null = null;
-		let ySnapTargetNode: NodeData | null = null;
+		let bestDeltaY = SNAP_THRESHOLD_STAGE;
+		let ySnapTargetStaticEdgeValue: number | null = null;
+		let ySnapActiveNodeOriginalOffset = 0;
+		let ySnapSourceStaticNode: NodeData | null = null;
 
-		let activeMovingEdgeY: number;
-		if (handle.includes('t')) activeMovingEdgeY = tentative.y;
-		else if (handle.includes('b')) activeMovingEdgeY = tentative.y + tentative.height;
-		else activeMovingEdgeY = Infinity;
+		const activeNodePointsY = [
+			{ currentVal: tentativeY, originalOffset: 0 }, // Top edge
+			{ currentVal: tentativeY + activeNode.height / 2, originalOffset: -activeNode.height / 2 }, // Center Y
+			{ currentVal: tentativeY + activeNode.height, originalOffset: -activeNode.height } // Bottom edge
+		];
 
-		if (activeMovingEdgeY !== Infinity) {
-			for (const staticNode of staticNodes) {
-				const staticEdgesY = [staticNode.y, staticNode.y + staticNode.height / 2, staticNode.y + staticNode.height];
-				for (const staticEdge of staticEdgesY) {
-					const delta = Math.abs(activeMovingEdgeY - staticEdge);
+		for (const staticNode of nodes) {
+			if (staticNode.id === activeNodeId) continue;
+			const staticNodePointsY = [staticNode.y, staticNode.y + staticNode.height / 2, staticNode.y + staticNode.height];
+
+			for (const activeP of activeNodePointsY) {
+				for (const staticP of staticNodePointsY) {
+					const delta = Math.abs(activeP.currentVal - staticP);
 					if (delta < bestDeltaY) {
 						bestDeltaY = delta;
-						finalSnapYValue = staticEdge;
-						ySnapTargetNode = staticNode;
+						ySnapTargetStaticEdgeValue = staticP;
+						ySnapActiveNodeOriginalOffset = activeP.originalOffset;
+						ySnapSourceStaticNode = staticNode;
+					}
+				}
+			}
+		}
+		
+		if (ySnapTargetStaticEdgeValue !== null) {
+			finalY = ySnapTargetStaticEdgeValue + ySnapActiveNodeOriginalOffset;
+		}
+
+		// --- Generate Snap Lines (after finalX and finalY are determined) ---
+		if (xSnapTargetStaticEdgeValue !== null && xSnapSourceStaticNode) {
+			activeSnapLines.push({
+				type: 'v',
+				stageValue: xSnapTargetStaticEdgeValue, // Line is AT the static node's edge
+				start: Math.min(finalY, xSnapSourceStaticNode.y, finalY + activeNode.height, xSnapSourceStaticNode.y + xSnapSourceStaticNode.height),
+				end: Math.max(finalY, xSnapSourceStaticNode.y, finalY + activeNode.height, xSnapSourceStaticNode.y + xSnapSourceStaticNode.height),
+			});
+		}
+		if (ySnapTargetStaticEdgeValue !== null && ySnapSourceStaticNode) {
+			// If an X snap also occurred, its line's vertical extent might need adjustment based on finalY.
+			// This is implicitly handled if line generation happens after both finalX/finalY are set.
+			activeSnapLines.push({
+				type: 'h',
+				stageValue: ySnapTargetStaticEdgeValue, // Line is AT the static node's edge
+				start: Math.min(finalX, ySnapSourceStaticNode.x, finalX + activeNode.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width),
+				end: Math.max(finalX, ySnapSourceStaticNode.x, finalX + activeNode.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width),
+			});
+		}
+		return { newX: finalX, newY: finalY };
+	}
+
+	function calculateAndApplySnapsForResize(
+		activeNodeId: string,
+		tentative: { x: number; y: number; width: number; height: number }, // Tentative geometry from mouse
+		handle: ResizeHandleType
+	): { newX: number; newY: number; newWidth: number; newHeight: number } {
+		activeSnapLines = []; // Clear previous lines for this move calculation
+		let res = { ...tentative }; // Start with the mouse-driven geometry
+		const staticNodes = nodes.filter(n => n.id !== activeNodeId);
+
+		// --- X-Axis Snapping (for left/right handles) ---
+		let bestDeltaX = SNAP_THRESHOLD_STAGE;
+		let xSnapTargetStaticEdgeValue: number | null = null; // The X value of the static edge to snap to
+		let xSnapSourceStaticNode: NodeData | null = null;
+
+		let activeMovingEdgeX: number | null = null; // The current X value of the edge being resized
+		if (handle.includes('l')) activeMovingEdgeX = res.x;
+		else if (handle.includes('r')) activeMovingEdgeX = res.x + res.width;
+
+		if (activeMovingEdgeX !== null) {
+			for (const staticNode of staticNodes) {
+				const staticNodePointsX = [staticNode.x, staticNode.x + staticNode.width / 2, staticNode.x + staticNode.width];
+				for (const staticEdge of staticNodePointsX) {
+					const delta = Math.abs(activeMovingEdgeX - staticEdge);
+					if (delta < bestDeltaX) {
+						bestDeltaX = delta;
+						xSnapTargetStaticEdgeValue = staticEdge;
+						xSnapSourceStaticNode = staticNode;
 					}
 				}
 			}
 		}
 
-		if (finalSnapYValue !== null) {
+		if (xSnapTargetStaticEdgeValue !== null) {
+			if (handle.includes('l')) {
+				const newX = xSnapTargetStaticEdgeValue;
+				const newWidth = (res.x + res.width) - newX; // Original right edge - new left edge
+				if (newWidth >= MIN_NODE_WIDTH) {
+					res.x = newX;
+					res.width = newWidth;
+				} else { xSnapTargetStaticEdgeValue = null; } // Cannot snap, would make node too small
+			} else if (handle.includes('r')) {
+				const newWidth = xSnapTargetStaticEdgeValue - res.x; // New right edge - current left edge
+				if (newWidth >= MIN_NODE_WIDTH) {
+					res.width = newWidth;
+				} else { xSnapTargetStaticEdgeValue = null; }
+			}
+		}
+
+		// --- Y-Axis Snapping (for top/bottom handles) ---
+		let bestDeltaY = SNAP_THRESHOLD_STAGE;
+		let ySnapTargetStaticEdgeValue: number | null = null;
+		let ySnapSourceStaticNode: NodeData | null = null;
+
+		let activeMovingEdgeY: number | null = null;
+		if (handle.includes('t')) activeMovingEdgeY = res.y;
+		else if (handle.includes('b')) activeMovingEdgeY = res.y + res.height;
+
+		if (activeMovingEdgeY !== null) {
+			for (const staticNode of staticNodes) {
+				const staticNodePointsY = [staticNode.y, staticNode.y + staticNode.height / 2, staticNode.y + staticNode.height];
+				for (const staticEdge of staticNodePointsY) {
+					const delta = Math.abs(activeMovingEdgeY - staticEdge);
+					if (delta < bestDeltaY) {
+						bestDeltaY = delta;
+						ySnapTargetStaticEdgeValue = staticEdge;
+						ySnapSourceStaticNode = staticNode;
+					}
+				}
+			}
+		}
+
+		if (ySnapTargetStaticEdgeValue !== null) {
 			if (handle.includes('t')) {
-				const dy = finalSnapYValue - res.y;
-				if (res.height - dy >= MIN_NODE_HEIGHT) { res.y += dy; res.height -= dy; }
-				else { finalSnapYValue = null; }
+				const newY = ySnapTargetStaticEdgeValue;
+				const newHeight = (res.y + res.height) - newY; // Original bottom edge - new top edge
+				if (newHeight >= MIN_NODE_HEIGHT) {
+					res.y = newY;
+					res.height = newHeight;
+				} else { ySnapTargetStaticEdgeValue = null; }
 			} else if (handle.includes('b')) {
-				const newHeight = finalSnapYValue - res.y;
-				if (newHeight >= MIN_NODE_HEIGHT) { res.height = newHeight; }
-				else { finalSnapYValue = null; }
+				const newHeight = ySnapTargetStaticEdgeValue - res.y; // New bottom edge - current top edge
+				if (newHeight >= MIN_NODE_HEIGHT) {
+					res.height = newHeight;
+				} else { ySnapTargetStaticEdgeValue = null; }
 			}
-			if (finalSnapYValue !== null && ySnapTargetNode) {
-				activeSnapLines.push({
-					type: 'h', stageValue: finalSnapYValue,
-					start: Math.min(res.x, ySnapTargetNode.x),
-					end: Math.max(res.x + res.width, ySnapTargetNode.x + ySnapTargetNode.width)
-				});
-			}
+		}
+		
+		// --- Generate Snap Lines (after res.x, res.y, res.width, res.height are potentially snapped) ---
+		if (xSnapTargetStaticEdgeValue !== null && xSnapSourceStaticNode) {
+			activeSnapLines.push({
+				type: 'v', stageValue: xSnapTargetStaticEdgeValue,
+				start: Math.min(res.y, xSnapSourceStaticNode.y, res.y + res.height, xSnapSourceStaticNode.y + xSnapSourceStaticNode.height),
+				end: Math.max(res.y, xSnapSourceStaticNode.y, res.y + res.height, xSnapSourceStaticNode.y + xSnapSourceStaticNode.height)
+			});
+		}
+		if (ySnapTargetStaticEdgeValue !== null && ySnapSourceStaticNode) {
+			activeSnapLines.push({
+				type: 'h', stageValue: ySnapTargetStaticEdgeValue,
+				start: Math.min(res.x, ySnapSourceStaticNode.x, res.x + res.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width),
+				end: Math.max(res.x, ySnapSourceStaticNode.x, res.x + res.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width)
+			});
 		}
 		return res;
 	}
-
 
 	function handlePointerDown(event: PointerEvent) {
 		const targetElement = event.target as HTMLElement;
@@ -381,7 +326,7 @@
 			activeResizeHandle = resizeHandle;
 			resizeStartMouseX = event.clientX;
 			resizeStartMouseY = event.clientY;
-			nodeInitialX = node.x;
+			nodeInitialX = node.x; // Store initial state of the node AT THE START of resize
 			nodeInitialY = node.y;
 			nodeInitialWidth = node.width;
 			nodeInitialHeight = node.height;
@@ -397,10 +342,10 @@
 			isDraggingNode = true;
 			draggedNodeId = nodeId;
 			selectedNodeId = nodeId;
-			dragStartX = event.clientX;
+			dragStartX = event.clientX; // Mouse position when drag started
 			dragStartY = event.clientY;
-			nodeStartDragX = node.x;
-			nodeStartDragY = node.y;
+			nodeStartDragX = node.x;   // Node's original X position when drag started
+			nodeStartDragY = node.y;   // Node's original Y position when drag started
 			containerElement.style.userSelect = 'none';
 			containerElement.setPointerCapture(event.pointerId);
 			containerElement.style.cursor = 'grabbing';
@@ -415,52 +360,52 @@
 	}
 
 	function handlePointerMove(event: PointerEvent) {
+		pointerVelX = event.movementX;
+		pointerVelY = event.movementY;
 		if (!event.isPrimary) return;
 
 		if (isResizingNode && resizingNodeId && activeResizeHandle) {
 			event.preventDefault();
 			const dxScreen = event.clientX - resizeStartMouseX;
 			const dyScreen = event.clientY - resizeStartMouseY;
-			const dxStage = dxScreen / zoom;
+			const dxStage = dxScreen / zoom; // Delta mouse movement in stage units
 			const dyStage = dyScreen / zoom;
 
-			let newX = nodeInitialX;
-			let newY = nodeInitialY;
-			let newWidth = nodeInitialWidth;
-			let newHeight = nodeInitialHeight;
+			// Calculate TENTATIVE new geometry based on initial state + mouse delta
+			// These are the values BEFORE snapping is applied for this frame
+			let tentativeX = nodeInitialX;
+			let tentativeY = nodeInitialY;
+			let tentativeWidth = nodeInitialWidth;
+			let tentativeHeight = nodeInitialHeight;
 
 			if (activeResizeHandle.includes('l')) {
-				newWidth = Math.max(MIN_NODE_WIDTH, nodeInitialWidth - dxStage);
-				newX = nodeInitialX + nodeInitialWidth - newWidth;
+				tentativeWidth = Math.max(MIN_NODE_WIDTH, nodeInitialWidth - dxStage);
+				tentativeX = nodeInitialX + nodeInitialWidth - tentativeWidth; // Adjust X to keep right edge stationary
 			} else if (activeResizeHandle.includes('r')) {
-				newWidth = Math.max(MIN_NODE_WIDTH, nodeInitialWidth + dxStage);
+				tentativeWidth = Math.max(MIN_NODE_WIDTH, nodeInitialWidth + dxStage);
 			}
 			if (activeResizeHandle.includes('t')) {
-				newHeight = Math.max(MIN_NODE_HEIGHT, nodeInitialHeight - dyStage);
-				newY = nodeInitialY + nodeInitialHeight - newHeight;
+				tentativeHeight = Math.max(MIN_NODE_HEIGHT, nodeInitialHeight - dyStage);
+				tentativeY = nodeInitialY + nodeInitialHeight - tentativeHeight; // Adjust Y to keep bottom edge stationary
 			} else if (activeResizeHandle.includes('b')) {
-				newHeight = Math.max(MIN_NODE_HEIGHT, nodeInitialHeight + dyStage);
+				tentativeHeight = Math.max(MIN_NODE_HEIGHT, nodeInitialHeight + dyStage);
 			}
+			// For middle handles, one dimension/position is preserved from nodeInitial
 			if (activeResizeHandle === 't' || activeResizeHandle === 'b') {
-				newWidth = nodeInitialWidth; newX = nodeInitialX;
+				tentativeWidth = nodeInitialWidth; tentativeX = nodeInitialX;
 			}
 			if (activeResizeHandle === 'l' || activeResizeHandle === 'r') {
-				newHeight = nodeInitialHeight; newY = nodeInitialY;
+				tentativeHeight = nodeInitialHeight; tentativeY = nodeInitialY;
 			}
 			
-			// Apply Snapping for Resize
 			const snappedGeom = calculateAndApplySnapsForResize(
                 resizingNodeId,
-                { x: newX, y: newY, width: newWidth, height: newHeight },
+                { x: tentativeX, y: tentativeY, width: tentativeWidth, height: tentativeHeight },
                 activeResizeHandle
             );
-            newX = snappedGeom.newX;
-            newY = snappedGeom.newY;
-            newWidth = snappedGeom.newWidth;
-            newHeight = snappedGeom.newHeight;
 
 			nodes = nodes.map((n) =>
-				n.id === resizingNodeId ? { ...n, x: newX, y: newY, width: newWidth, height: newHeight } : n
+				n.id === resizingNodeId ? { ...n, ...snappedGeom } : n
 			);
 		} else if (isDraggingNode && draggedNodeId) {
 			event.preventDefault();
@@ -469,19 +414,17 @@
 			const dxStage = dxScreen / zoom;
 			const dyStage = dyScreen / zoom;
 
+			// Calculate TENTATIVE new position based on original start + total mouse delta
 			let tentativeNewX = nodeStartDragX + dxStage;
 			let tentativeNewY = nodeStartDragY + dyStage;
 
-			// Apply Snapping for Drag
 			const { newX: snappedX, newY: snappedY } = calculateAndApplySnapsForDrag(
                 draggedNodeId,
                 tentativeNewX,
                 tentativeNewY
             );
-            tentativeNewX = snappedX;
-            tentativeNewY = snappedY;
-
-			nodes = nodes.map((n) => (n.id === draggedNodeId ? { ...n, x: tentativeNewX, y: tentativeNewY } : n));
+            
+			nodes = nodes.map((n) => (n.id === draggedNodeId ? { ...n, x: snappedX, y: snappedY } : n));
 		} else if (isPanning) {
 			event.preventDefault();
 			panX = event.clientX - startPanX;
@@ -491,7 +434,7 @@
 
 	function handlePointerUp(event: PointerEvent) {
 		if (event.button !== 0) return;
-		activeSnapLines = []; // Clear lines on pointer up
+		activeSnapLines = []; // Clear lines on pointer up, regardless of action
 
 		if (isResizingNode) {
 			containerElement.releasePointerCapture(event.pointerId);
@@ -513,12 +456,13 @@
 
 	function handlePointerLeave(event: PointerEvent) {
 		if (isDraggingNode || isPanning || isResizingNode) {
-			handlePointerUp(event);
+			handlePointerUp(event); // Treat as pointer up to release states and clear lines
 		}
 	}
 
 	function handleWheel(event: WheelEvent) {
 		event.preventDefault();
+		activeSnapLines = []; // Clear snap lines if zooming occurs
 		const { x: mouseX, y: mouseY } = getMousePosition(event);
 		const delta = -event.deltaY * zoomSensitivity;
 		const newZoom = Math.max(minZoom, Math.min(maxZoom, zoom * (1 + delta)));
@@ -563,43 +507,29 @@
 		let defaultHeight = DEFAULT_NODE_HEIGHT;
 
 		switch (type) {
-			case 'image':
-				component = ImageNode as unknown as ComponentType<SvelteComponent>;
-				break;
-			case 'text':
-				component = TextNode as unknown as ComponentType<SvelteComponent>;
-				break;
-			default:
-				console.error(`Unknown node type: ${type}`);
-				// @ts-expect-error
+			case 'image': component = ImageNode as unknown as ComponentType<SvelteComponent>; break;
+			case 'text': component = TextNode as unknown as ComponentType<SvelteComponent>; break;
+			default: console.error(`Unknown node type: ${type}`); // @ts-expect-error
 				return;
 		}
 		const newNode: NodeData = {
 			id: crypto.randomUUID(),
-			component,
-			x, y,
+			component, x, y,
 			width: typeof props.width === 'number' ? props.width : defaultWidth,
 			height: typeof props.height === 'number' ? props.height : defaultHeight,
-			showId: nodes[0]?.showId ?? false, // Inherit showId from first node or default to false
+			showId: props.showId ?? (nodes[0]?.showId ?? false),
 			props
 		};
 		nodes = [...nodes, newNode];
 		return newNode;
 	}
 
-	export function panBy(dx: number, dy: number): void {
-		panX += dx;
-		panY += dy;
-	}
-
+	export function panBy(dx: number, dy: number): void { panX += dx; panY += dy; }
 	export function panTo(targetX: number, targetY: number): void {
 		if (!containerElement) return;
-		const containerWidth = containerElement.clientWidth;
-		const containerHeight = containerElement.clientHeight;
-		panX = containerWidth / 2 - targetX * zoom;
-		panY = containerHeight / 2 - targetY * zoom;
+		panX = containerElement.clientWidth / 2 - targetX * zoom;
+		panY = containerElement.clientHeight / 2 - targetY * zoom;
 	}
-
 	export function setZoom(newZoomLevel: number, centerX?: number, centerY?: number): void {
 		const clampedZoom = Math.max(minZoom, Math.min(maxZoom, newZoomLevel));
 		if (centerX !== undefined && centerY !== undefined && containerElement) {
@@ -607,31 +537,24 @@
 			const screenCenterY = centerY * zoom + panY;
 			panX = screenCenterX - centerX * clampedZoom;
 			panY = screenCenterY - centerY * clampedZoom;
-		} else if (centerX !== undefined || centerY !== undefined) {
-			console.warn('setZoom requires both centerX and centerY for centered zoom.');
-		} else {
-			if (containerElement) {
-				const screenCenterX = containerElement.clientWidth / 2;
-				const screenCenterY = containerElement.clientHeight / 2;
-				const stageCenterX = (screenCenterX - panX) / zoom;
-				const stageCenterY = (screenCenterY - panY) / zoom;
-				panX = screenCenterX - stageCenterX * clampedZoom;
-				panY = screenCenterY - stageCenterY * clampedZoom;
-			}
+		} else if (containerElement) {
+			const screenCenterX = containerElement.clientWidth / 2;
+			const screenCenterY = containerElement.clientHeight / 2;
+			const stageCenterX = (screenCenterX - panX) / zoom;
+			const stageCenterY = (screenCenterY - panY) / zoom;
+			panX = screenCenterX - stageCenterX * clampedZoom;
+			panY = screenCenterY - stageCenterY * clampedZoom;
 		}
 		zoom = clampedZoom;
 	}
-
-	export function getViewport(): { panX: number; panY: number; zoom: number } {
-		return { panX, panY, zoom };
-	}
-
+	export function getViewport(): { panX: number; panY: number; zoom: number } { return { panX, panY, zoom }; }
 	export function getSelectedNodeId(): string | null { return selectedNodeId; }
 	export function setSelectedNodeId(id: string | null): void { selectedNodeId = id; }
 
 	const resizeHandles: ResizeHandleType[] = ['tl', 't', 'tr', 'l', 'r', 'bl', 'b', 'br'];
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	class="whiteboard-container"
 	bind:this={containerElement}
@@ -677,18 +600,18 @@
             <div
                 class="snap-line"
                 style:position="absolute"
-                style:background-color="rgba(0, 100, 255, 0.7)"
+                style:background-color="rgba(255, 0, 150, 0.6)" 
                 style:left="{line.type === 'v' ? line.stageValue - 0.5 : line.start}px"
                 style:top="{line.type === 'h' ? line.stageValue - 0.5 : line.start}px"
                 style:width="{line.type === 'v' ? '1px' : (line.end - line.start)}px"
                 style:height="{line.type === 'h' ? '1px' : (line.end - line.start)}px"
+				style:pointer-events="none"
             ></div>
         {/each}
 	</div>
 </div>
 
 <style>
-	/* ... (previous styles) ... */
 	.whiteboard-container {
 		width: 100%;
 		height: 100%;
@@ -739,7 +662,6 @@
 		box-sizing: border-box;
 		z-index: 11;
 	}
-	/* ... (resize handle positions) ... */
 	.resize-handle-tl { top: -5px; left: -5px; cursor: nwse-resize; }
 	.resize-handle-t { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
 	.resize-handle-tr { top: -5px; right: -5px; cursor: nesw-resize; }
@@ -755,7 +677,7 @@
 	.whiteboard-container:focus-visible { outline: 2px solid blue; outline-offset: 2px; }
 
 	.snap-line {
-		z-index: 5; /* Below selected node (10) but above others (1) */
-		pointer-events: none; /* So they don't interfere with mouse operations */
+		z-index: 5; 
+		pointer-events: none; 
 	}
 </style>
