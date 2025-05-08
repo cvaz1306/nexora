@@ -6,17 +6,20 @@
 </script>
 
 <div class="node-base-wrapper">
-	<div bind:this={idWrapper}>
+	<div bind:this={idWrapper} class="node-label">
 		{#if showId}
 			{id}
 		{/if}
 	</div>
-	<div class="node-base" style="height: {showId ? `calc(100% - ${idWrapper.offsetHeight}px)` : '100%'};">
+	<div class="node-base" style="height: {showId ? `calc(100% - 30px)` : '100%'};">
 		<slot />
 	</div>
 </div>
 
 <style>
+	.node-label {
+		height: 30px;
+	}
 	.node-base-wrapper {
 		width: 100%; /* Fill the parent (.node-wrapper) */
 		height: 100%; /* Fill the parent (.node-wrapper) */

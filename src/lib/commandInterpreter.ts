@@ -31,7 +31,7 @@ export class CommandInterpreter {
 		const params = parts.slice(1);
 
 		if (!this.controller.isReady() && !['help', 'log'].includes(command)) {
-			console.warn("Whiteboard not ready. Try command again shortly or type 'help'.");
+			console.warn("Whiteboard instance not fully ready. Try command again shortly or type 'help'.");
 			return;
 		}
 
@@ -62,9 +62,16 @@ export class CommandInterpreter {
 			case 'image':
 				this.controller.addImageNode(params[0]);
 				break;
+			case 'connect':
+				if (params.length !== 2) {
+					console.warn('Usage: connect <nodeId1> <nodeId2>');
+					this.showHelpCallback();
+					return;
+				}
+				this.controller.connectNodes(params[0], params[1]);
+				break;
 			case 'zoom':
 				if (params.length < 1) {
-					// If just 'zoom', could show current zoom or treat as help for zoom
 					console.warn("Usage: zoom <in|out|value> [factor]. E.g., 'zoom in', 'zoom 0.5'");
 					this.showHelpCallback();
 					return;
@@ -75,7 +82,6 @@ export class CommandInterpreter {
 				} else if (zoomAction === 'out') {
 					this.controller.zoom('out', params[1]);
 				} else {
-					// Try to interpret as a direct zoom level
 					const zoomLevel = parseFloat(zoomAction);
 					if (!isNaN(zoomLevel)) {
 						this.controller.setZoom(zoomLevel);
@@ -85,21 +91,22 @@ export class CommandInterpreter {
 					}
 				}
 				break;
-			case 'zoomin': // Alias
+			case 'zoomin':
 				this.controller.zoom('in', params[0]);
 				break;
-			case 'zoomout': // Alias
+			case 'zoomout':
 				this.controller.zoom('out', params[0]);
 				break;
 			case 'set':
 				if (params.length < 1) {
-					console.warn("Usage: set <property> <value>. E.g., 'set zoom 0.8', 'set pan 100 100', 'set sid'");
+					console.warn("Usage: set <property> <value>. E.g., 'set zoom 0.8', 'set pan 100 100', 'set sid', 'set connections on'");
 					this.showHelpCallback();
 					return;
 				}
-				switch (params[0]?.toLowerCase()) {
+				const setProperty = params[0]?.toLowerCase();
+				switch (setProperty) {
 					case 'zoom':
-						this.controller.setZoom(params[1]); // Pass string, controller handles parsing
+						this.controller.setZoom(params[1]);
 						break;
 					case 'pan':
 						const x = parseFloat(params[1]);
@@ -111,32 +118,40 @@ export class CommandInterpreter {
 							this.showHelpCallback();
 						}
 						break;
-					case 'sid': // Toggle Show ID
+					case 'sid':
 						this.controller.toggleIDHidden();
 						break;
+					case 'connections':
+						if (params.length !== 2 || !['on', 'off'].includes(params[1]?.toLowerCase())) {
+							console.warn("Usage: set connections <on|off>");
+							this.showHelpCallback();
+						} else {
+							this.controller.toggleConnectionsVisibility(params[1]?.toLowerCase() === 'on');
+						}
+						break;
 					default:
-						console.warn(`Unknown 'set' subcommand: "${params[0]}". Try 'set zoom', 'set pan', or 'set sid'.`);
+						console.warn(`Unknown 'set' subcommand: "${setProperty}". Try 'set zoom', 'set pan', 'set sid', or 'set connections'.`);
 						this.showHelpCallback();
 				}
-				break; // Added missing break for 'set' case
+				break;
 			case 'reset':
-			case 'resetview': // Alias
+			case 'resetview':
 				this.controller.resetView();
-				break;
-			case 'log':
-			case 'ls': // Alias
-				this.controller.logNodes();
-				break;
-			case 'clear':
-			case 'cls': // Alias
-				this.controller.clearNodes();
 				break;
 			case 'arrange':
 			case 'layout':
-				this.controller.autoArrangeNodes(params[0]); // Pass optional padding string
+				this.controller.autoArrangeNodes(params[0]);
+				break;
+			case 'log':
+			case 'ls':
+				this.controller.logNodes();
+				break;
+			case 'clear':
+			case 'cls':
+				this.controller.clearNodes();
 				break;
 			case 'help':
-			case '?': // Alias
+			case '?':
 				this.showHelpCallback();
 				break;
 			default:

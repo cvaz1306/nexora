@@ -1,50 +1,63 @@
 <script context="module" lang="ts">
+	// Export types defined in the module script
 	import type { ComponentType, SvelteComponent } from 'svelte';
 
 	export type NodeData = {
 		id: string;
 		showId: boolean;
 		component: ComponentType<SvelteComponent>;
-		x: number;
-		y: number;
+		x: number; // Position on the whiteboard (unscaled stage coords)
+		y: number; // Position on the whiteboard (unscaled stage coords)
 		props: Record<string, any>;
-		width: number;
-		height: number;
+		width: number; // Node width in stage units
+		height: number; // Node height in stage units
+	};
+
+	export type ConnectorHandleType = 'top' | 'right' | 'bottom' | 'left';
+
+	export type Connection = {
+		id: string; // Unique ID for the connection itself
+		from: { nodeId: string; handle: ConnectorHandleType }; // Source node ID and handle
+		to: { nodeId: string; handle: ConnectorHandleType };   // Target node ID and handle
 	};
 </script>
 
 <script lang="ts">
-	export let nodes: NodeData[] = [];
-	import { onMount, onDestroy, tick } from 'svelte';
+	// Import the component type itself for bind:this and type hints
+	import type Whiteboard from '$lib/Whiteboard.svelte'; // Corrected import syntax for the component instance type
+
+	// Import types from the module script
+	import type { NodeData, Connection, ConnectorHandleType } from '$lib/Whiteboard.svelte';
+
+	import { onMount, onDestroy, tick, createEventDispatcher } from 'svelte';
 	import { browser } from '$app/environment';
 
 	import ImageNode from './ImageNode.svelte';
 	import TextNode from './TextNode.svelte';
 
+	export let nodes: NodeData[] = [];
 	export let minZoom = 0.1;
 	export let maxZoom = 5.0;
 	export let zoomSensitivity = 0.002;
 	export let gridSpacing = 20;
+	export let connections: Connection[] = [];
+	export let showConnections: boolean = true;
 
 	const DEFAULT_NODE_WIDTH = 200;
 	const DEFAULT_NODE_HEIGHT = 150;
 	const MIN_NODE_WIDTH = 30;
 	const MIN_NODE_HEIGHT = 30;
-	let SNAP_THRESHOLD_STAGE = 8;
-	
+	const SNAP_THRESHOLD_STAGE = 8;
+
 	let panX = 0;
 	let panY = 0;
-	
-	let pointerVelX = 0;
-	let pointerVelY = 0;
-	// $: SNAP_THRESHOLD_STAGE = 8 / (Math.sqrt(pointerVelX * pointerVelX + pointerVelY * pointerVelY)/3); // Snap sensitivity in stage units (increased slightly)
-
 	let zoom = 1;
 	let isPanning = false;
 	let startPanX = 0;
 	let startPanY = 0;
 	let containerElement: HTMLDivElement;
 	let stageElement: HTMLDivElement;
+	let svgConnectionLayer: SVGSVGElement;
 
 	let isDraggingNode = false;
 	let draggedNodeId: string | null = null;
@@ -73,6 +86,19 @@
 		end: number;
 	}> = [];
 
+	let draggingConnection: {
+		startNodeId: string;
+		startHandle: ConnectorHandleType;
+		startXStage: number;
+		startYStage: number;
+		currentMouseXScreen: number;
+		currentMouseYScreen: number;
+	} | null = null;
+
+	const dispatch = createEventDispatcher<{
+		addConnection: { from: string; to: string };
+	}>();
+
 	$: backgroundSize = gridSpacing * zoom;
 	$: backgroundPositionX = panX % backgroundSize;
 	$: backgroundPositionY = panY % backgroundSize;
@@ -83,140 +109,195 @@
       background-position: ${backgroundPositionX}px ${backgroundPositionY}px;
     `;
 
-	function getMousePosition(event: MouseEvent | WheelEvent | PointerEvent): { x: number; y: number; } {
+	$: connectionLines = connections.map(conn => {
+		const fromNode = nodes.find(n => n.id === conn.from.nodeId);
+		const toNode = nodes.find(n => n.id === conn.to.nodeId);
+
+		if (!fromNode || !toNode) return null;
+
+		const fromPosStage = getConnectorPosition(fromNode, conn.from.handle);
+		const toPosStage = getConnectorPosition(toNode, conn.to.handle);
+
+		const fromPosScreen = stageToScreenCoordinates(fromPosStage.x, fromPosStage.y);
+		const toPosScreen = stageToScreenCoordinates(toPosStage.x, toPosStage.y);
+
+		return {
+			id: conn.id,
+			x1: fromPosScreen.x,
+			y1: fromPosScreen.y,
+			x2: toPosScreen.x,
+			y2: toPosScreen.y,
+		};
+	}).filter(line => line !== null);
+
+	function getMousePosition(event: MouseEvent | WheelEvent | PointerEvent): {
+		x: number;
+		y: number;
+	} {
 		if (!containerElement) return { x: 0, y: 0 };
 		const rect = containerElement.getBoundingClientRect();
-		return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+		return {
+			x: event.clientX - rect.left,
+			y: event.clientY - rect.top
+		};
 	}
 
 	function screenToStageCoordinates(screenX: number, screenY: number): { x: number; y: number } {
-		return { x: (screenX - panX) / zoom, y: (screenY - panY) / zoom };
+		return {
+			x: (screenX - panX) / zoom,
+			y: (screenY - panY) / zoom
+		};
+	}
+
+	function stageToScreenCoordinates(stageX: number, stageY: number): { x: number; y: number } {
+		return {
+			x: stageX * zoom + panX,
+			y: stageY * zoom + panY
+		};
+	}
+
+	function getConnectorPosition(node: NodeData, handle: ConnectorHandleType): { x: number; y: number } {
+		const nodeCenterX = node.x + node.width / 2;
+		const nodeCenterY = node.y + node.height / 2;
+
+		switch (handle) {
+			case 'top': return { x: nodeCenterX, y: node.y };
+			case 'bottom': return { x: nodeCenterX, y: node.y + node.height };
+			case 'left': return { x: node.x, y: nodeCenterY };
+			case 'right': return { x: node.x + node.width, y: nodeCenterY };
+		}
 	}
 
 	export function getStageCoordinatesForScreenCenter(): { x: number; y: number } | null {
-		if (!containerElement) return null;
-		return screenToStageCoordinates(containerElement.clientWidth / 2, containerElement.clientHeight / 2);
+		if (!containerElement) {
+			console.warn('Whiteboard.getStageCoordinatesForScreenCenter: containerElement not ready.');
+			return null;
+		}
+		return screenToStageCoordinates(
+			containerElement.clientWidth / 2,
+			containerElement.clientHeight / 2
+		);
 	}
 
-	// --- Snapping Logic ---
 	function calculateAndApplySnapsForDrag(
-		activeNodeId: string,
-		tentativeX: number, // The node's desired X based on mouse movement
-		tentativeY: number  // The node's desired Y based on mouse movement
-	): { newX: number; newY: number } {
-		const activeNode = nodes.find(n => n.id === activeNodeId);
-		if (!activeNode) return { newX: tentativeX, newY: tentativeY };
+        activeNodeId: string,
+        tentativeX: number,
+        tentativeY: number
+    ): { newX: number; newY: number } {
+        const activeNode = nodes.find(n => n.id === activeNodeId);
+        if (!activeNode) return { newX: tentativeX, newY: tentativeY };
 
-		activeSnapLines = []; // Clear previous lines for this move calculation
-		let finalX = tentativeX;
-		let finalY = tentativeY;
+        activeSnapLines = [];
+        let finalX = tentativeX;
+        let finalY = tentativeY;
 
-		// --- X-Axis Snapping ---
-		let bestDeltaX = SNAP_THRESHOLD_STAGE;
-		let xSnapTargetStaticEdgeValue: number | null = null; // The X value of the static edge we snap to
-		let xSnapActiveNodeOriginalOffset = 0; // Offset of the active node's snapping edge from its own tentativeX
-		let xSnapSourceStaticNode: NodeData | null = null;
+        let bestDeltaX = SNAP_THRESHOLD_STAGE;
+        let xSnapTargetStaticEdgeValue: number | null = null;
+        let xSnapActiveNodeOriginalOffset = 0;
+        let xSnapSourceStaticNode: NodeData | null = null;
 
-		// Define edges of the active node based on its tentative position
-		const activeNodePointsX = [
-			{ currentVal: tentativeX, originalOffset: 0 }, // Left edge
-			{ currentVal: tentativeX + activeNode.width / 2, originalOffset: -activeNode.width / 2 }, // Center X
-			{ currentVal: tentativeX + activeNode.width, originalOffset: -activeNode.width }  // Right edge
-		];
+        const activeNodePointsX = [
+            { currentVal: tentativeX, originalOffset: 0 },
+            { currentVal: tentativeX + activeNode.width / 2, originalOffset: -activeNode.width / 2 },
+            { currentVal: tentativeX + activeNode.width, originalOffset: -activeNode.width }
+        ];
 
-		for (const staticNode of nodes) {
-			if (staticNode.id === activeNodeId) continue;
-			const staticNodePointsX = [staticNode.x, staticNode.x + staticNode.width / 2, staticNode.x + staticNode.width];
+        for (const staticNode of nodes) {
+            if (staticNode.id === activeNodeId) continue;
+            const staticNodePointsX = [staticNode.x, staticNode.x + staticNode.width / 2, staticNode.x + staticNode.width];
 
-			for (const activeP of activeNodePointsX) {
-				for (const staticP of staticNodePointsX) {
-					const delta = Math.abs(activeP.currentVal - staticP);
-					if (delta < bestDeltaX) {
-						bestDeltaX = delta;
-						xSnapTargetStaticEdgeValue = staticP;
-						xSnapActiveNodeOriginalOffset = activeP.originalOffset;
-						xSnapSourceStaticNode = staticNode;
-					}
-				}
-			}
-		}
+            for (const activeP of activeNodePointsX) {
+                for (const staticP of staticNodePointsX) {
+                    const delta = Math.abs(activeP.currentVal - staticP);
+                    if (delta < bestDeltaX) {
+                        bestDeltaX = delta;
+                        xSnapTargetStaticEdgeValue = staticP;
+                        xSnapActiveNodeOriginalOffset = activeP.originalOffset;
+                        xSnapSourceStaticNode = staticNode;
+                    }
+                }
+            }
+        }
 
-		if (xSnapTargetStaticEdgeValue !== null) {
-			finalX = xSnapTargetStaticEdgeValue + xSnapActiveNodeOriginalOffset;
-		}
+        if (xSnapTargetStaticEdgeValue !== null) {
+            finalX = xSnapTargetStaticEdgeValue + xSnapActiveNodeOriginalOffset;
+        }
 
-		// --- Y-Axis Snapping ---
-		let bestDeltaY = SNAP_THRESHOLD_STAGE;
-		let ySnapTargetStaticEdgeValue: number | null = null;
-		let ySnapActiveNodeOriginalOffset = 0;
-		let ySnapSourceStaticNode: NodeData | null = null;
+        let bestDeltaY = SNAP_THRESHOLD_STAGE;
+        let ySnapTargetStaticEdgeValue: number | null = null;
+        let ySnapActiveNodeOriginalOffset = 0;
+        let ySnapSourceStaticNode: NodeData | null = null;
 
-		const activeNodePointsY = [
-			{ currentVal: tentativeY, originalOffset: 0 }, // Top edge
-			{ currentVal: tentativeY + activeNode.height / 2, originalOffset: -activeNode.height / 2 }, // Center Y
-			{ currentVal: tentativeY + activeNode.height, originalOffset: -activeNode.height } // Bottom edge
-		];
+        const activeNodePointsY = [
+            { currentVal: tentativeY, originalOffset: 0 },
+            { currentVal: tentativeY + activeNode.height / 2, originalOffset: -activeNode.height / 2 },
+            { currentVal: tentativeY + activeNode.height, originalOffset: -activeNode.height }
+        ];
 
-		for (const staticNode of nodes) {
-			if (staticNode.id === activeNodeId) continue;
-			const staticNodePointsY = [staticNode.y, staticNode.y + staticNode.height / 2, staticNode.y + staticNode.height];
+        for (const staticNode of nodes) {
+            if (staticNode.id === activeNodeId) continue;
+            const staticNodePointsY = [staticNode.y, staticNode.y + staticNode.height / 2, staticNode.y + staticNode.height];
 
-			for (const activeP of activeNodePointsY) {
-				for (const staticP of staticNodePointsY) {
-					const delta = Math.abs(activeP.currentVal - staticP);
-					if (delta < bestDeltaY) {
-						bestDeltaY = delta;
-						ySnapTargetStaticEdgeValue = staticP;
-						ySnapActiveNodeOriginalOffset = activeP.originalOffset;
-						ySnapSourceStaticNode = staticNode;
-					}
-				}
-			}
-		}
-		
-		if (ySnapTargetStaticEdgeValue !== null) {
-			finalY = ySnapTargetStaticEdgeValue + ySnapActiveNodeOriginalOffset;
-		}
+            for (const activeP of activeNodePointsY) {
+                for (const staticP of staticNodePointsY) {
+                    const delta = Math.abs(activeP.currentVal - staticP);
+                    if (delta < bestDeltaY) {
+                        bestDeltaY = delta;
+                        ySnapTargetStaticEdgeValue = staticP;
+                        ySnapActiveNodeOriginalOffset = activeP.originalOffset;
+                        ySnapSourceStaticNode = staticNode;
+                    }
+                }
+            }
+        }
 
-		// --- Generate Snap Lines (after finalX and finalY are determined) ---
+        if (ySnapTargetStaticEdgeValue !== null) {
+            finalY = ySnapTargetStaticEdgeValue + ySnapActiveNodeOriginalOffset;
+        }
+
 		if (xSnapTargetStaticEdgeValue !== null && xSnapSourceStaticNode) {
 			activeSnapLines.push({
 				type: 'v',
-				stageValue: xSnapTargetStaticEdgeValue, // Line is AT the static node's edge
+				stageValue: xSnapTargetStaticEdgeValue,
 				start: Math.min(finalY, xSnapSourceStaticNode.y, finalY + activeNode.height, xSnapSourceStaticNode.y + xSnapSourceStaticNode.height),
 				end: Math.max(finalY, xSnapSourceStaticNode.y, finalY + activeNode.height, xSnapSourceStaticNode.y + xSnapSourceStaticNode.height),
 			});
 		}
 		if (ySnapTargetStaticEdgeValue !== null && ySnapSourceStaticNode) {
-			// If an X snap also occurred, its line's vertical extent might need adjustment based on finalY.
-			// This is implicitly handled if line generation happens after both finalX/finalY are set.
 			activeSnapLines.push({
 				type: 'h',
-				stageValue: ySnapTargetStaticEdgeValue, // Line is AT the static node's edge
+				stageValue: ySnapTargetStaticEdgeValue,
 				start: Math.min(finalX, ySnapSourceStaticNode.x, finalX + activeNode.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width),
 				end: Math.max(finalX, ySnapSourceStaticNode.x, finalX + activeNode.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width),
 			});
 		}
-		return { newX: finalX, newY: finalY };
-	}
+
+        return { newX: finalX, newY: finalY };
+    }
 
 	function calculateAndApplySnapsForResize(
 		activeNodeId: string,
-		tentative: { x: number; y: number; width: number; height: number }, // Tentative geometry from mouse
+		tentative: { x: number; y: number; width: number; height: number },
 		handle: ResizeHandleType
 	): { newX: number; newY: number; newWidth: number; newHeight: number } {
-		activeSnapLines = []; // Clear previous lines for this move calculation
-		let res = { ...tentative }; // Start with the mouse-driven geometry
+		activeSnapLines = [];
+		let res = { ...tentative };
 		const staticNodes = nodes.filter(n => n.id !== activeNodeId);
 
-		// --- X-Axis Snapping (for left/right handles) ---
 		let bestDeltaX = SNAP_THRESHOLD_STAGE;
-		let xSnapTargetStaticEdgeValue: number | null = null; // The X value of the static edge to snap to
+		let xSnapTargetStaticEdgeValue: number | null = null;
 		let xSnapSourceStaticNode: NodeData | null = null;
 
-		let activeMovingEdgeX: number | null = null; // The current X value of the edge being resized
-		if (handle.includes('l')) activeMovingEdgeX = res.x;
-		else if (handle.includes('r')) activeMovingEdgeX = res.x + res.width;
+		let activeMovingEdgeX: number | null = null;
+		let fixedEdgeX: number | null = null;
+
+		if (handle.includes('l')) {
+			activeMovingEdgeX = res.x;
+			fixedEdgeX = res.x + res.width;
+		} else if (handle.includes('r')) {
+			activeMovingEdgeX = res.x + res.width;
+			fixedEdgeX = res.x;
+		}
 
 		if (activeMovingEdgeX !== null) {
 			for (const staticNode of staticNodes) {
@@ -232,30 +313,37 @@
 			}
 		}
 
-		if (xSnapTargetStaticEdgeValue !== null) {
+		if (xSnapTargetStaticEdgeValue !== null && fixedEdgeX !== null) {
 			if (handle.includes('l')) {
 				const newX = xSnapTargetStaticEdgeValue;
-				const newWidth = (res.x + res.width) - newX; // Original right edge - new left edge
+				const newWidth = fixedEdgeX - newX;
 				if (newWidth >= MIN_NODE_WIDTH) {
 					res.x = newX;
 					res.width = newWidth;
-				} else { xSnapTargetStaticEdgeValue = null; } // Cannot snap, would make node too small
+				} else { xSnapTargetStaticEdgeValue = null; }
 			} else if (handle.includes('r')) {
-				const newWidth = xSnapTargetStaticEdgeValue - res.x; // New right edge - current left edge
+				const newWidth = xSnapTargetStaticEdgeValue - fixedEdgeX;
 				if (newWidth >= MIN_NODE_WIDTH) {
 					res.width = newWidth;
 				} else { xSnapTargetStaticEdgeValue = null; }
 			}
 		}
 
-		// --- Y-Axis Snapping (for top/bottom handles) ---
 		let bestDeltaY = SNAP_THRESHOLD_STAGE;
 		let ySnapTargetStaticEdgeValue: number | null = null;
 		let ySnapSourceStaticNode: NodeData | null = null;
 
 		let activeMovingEdgeY: number | null = null;
-		if (handle.includes('t')) activeMovingEdgeY = res.y;
-		else if (handle.includes('b')) activeMovingEdgeY = res.y + res.height;
+		let fixedEdgeY: number | null = null;
+
+		if (handle.includes('t')) {
+			activeMovingEdgeY = res.y;
+			fixedEdgeY = res.y + res.height;
+		}
+		else if (handle.includes('b')) {
+			activeMovingEdgeY = res.y + res.height;
+			fixedEdgeY = res.y;
+		}
 
 		if (activeMovingEdgeY !== null) {
 			for (const staticNode of staticNodes) {
@@ -271,23 +359,22 @@
 			}
 		}
 
-		if (ySnapTargetStaticEdgeValue !== null) {
+		if (ySnapTargetStaticEdgeValue !== null && fixedEdgeY !== null) {
 			if (handle.includes('t')) {
 				const newY = ySnapTargetStaticEdgeValue;
-				const newHeight = (res.y + res.height) - newY; // Original bottom edge - new top edge
+				const newHeight = fixedEdgeY - newY;
 				if (newHeight >= MIN_NODE_HEIGHT) {
 					res.y = newY;
 					res.height = newHeight;
 				} else { ySnapTargetStaticEdgeValue = null; }
 			} else if (handle.includes('b')) {
-				const newHeight = ySnapTargetStaticEdgeValue - res.y; // New bottom edge - current top edge
+				const newHeight = ySnapTargetStaticEdgeValue - fixedEdgeY;
 				if (newHeight >= MIN_NODE_HEIGHT) {
 					res.height = newHeight;
 				} else { ySnapTargetStaticEdgeValue = null; }
 			}
 		}
-		
-		// --- Generate Snap Lines (after res.x, res.y, res.width, res.height are potentially snapped) ---
+
 		if (xSnapTargetStaticEdgeValue !== null && xSnapSourceStaticNode) {
 			activeSnapLines.push({
 				type: 'v', stageValue: xSnapTargetStaticEdgeValue,
@@ -298,8 +385,8 @@
 		if (ySnapTargetStaticEdgeValue !== null && ySnapSourceStaticNode) {
 			activeSnapLines.push({
 				type: 'h', stageValue: ySnapTargetStaticEdgeValue,
-				start: Math.min(res.x, ySnapSourceStaticNode.x, res.x + res.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width),
-				end: Math.max(res.x, ySnapSourceStaticNode.x, res.x + res.width, ySnapSourceStaticNode.x + ySnapSourceStaticNode.width)
+				start: Math.min(res.x, xSnapSourceStaticNode.x, res.x + res.width, xSnapSourceStaticNode.x + xSnapSourceStaticNode.width),
+				end: Math.max(res.x, xSnapSourceStaticNode.x, res.x + res.width, xSnapSourceStaticNode.x + xSnapSourceStaticNode.width)
 			});
 		}
 		return res;
@@ -309,12 +396,54 @@
 		const targetElement = event.target as HTMLElement;
 		const nodeWrapper = targetElement.closest('.node-wrapper');
 		const resizeHandle = targetElement.dataset.resizeHandle as ResizeHandleType;
+		const connectorHandle = targetElement.dataset.connectorHandle as ConnectorHandleType;
 
-		activeSnapLines = []; // Clear snap lines on any new interaction start
+		activeSnapLines = [];
+
+		const isTextEditable = targetElement.isContentEditable ||
+							   targetElement.tagName === 'INPUT' ||
+							   targetElement.tagName === 'TEXTAREA';
+
+		if (selectedNodeId && nodeWrapper && nodeWrapper.getAttribute('data-node-id') === selectedNodeId && !resizeHandle && !connectorHandle && !isTextEditable) {
+             // Keep selected, allow drag below
+        } else if (selectedNodeId && nodeWrapper && nodeWrapper.getAttribute('data-node-id') !== selectedNodeId) {
+             selectedNodeId = nodeWrapper.getAttribute('data-node-id');
+             event.stopPropagation();
+             return;
+        } else if (!nodeWrapper && selectedNodeId !== null) {
+             selectedNodeId = null;
+        } else if (nodeWrapper && !selectedNodeId) {
+			selectedNodeId = nodeWrapper.getAttribute('data-node-id');
+			event.stopPropagation();
+			return;
+		}
 
 		if (event.button !== 0) return;
 
-		if (resizeHandle && nodeWrapper && selectedNodeId === nodeWrapper.getAttribute('data-node-id')) {
+		if (connectorHandle && nodeWrapper) {
+			event.stopPropagation();
+			const nodeId = nodeWrapper.getAttribute('data-node-id');
+			if (!nodeId) return;
+
+			const node = nodes.find(n => n.id === nodeId);
+			if (!node) return;
+
+			const startPosStage = getConnectorPosition(node, connectorHandle);
+			const mousePosScreen = getMousePosition(event);
+
+			draggingConnection = {
+				startNodeId: nodeId,
+				startHandle: connectorHandle,
+				startXStage: startPosStage.x,
+				startYStage: startPosStage.y,
+				currentMouseXScreen: mousePosScreen.x,
+				currentMouseYScreen: mousePosScreen.y,
+			};
+
+			containerElement.setPointerCapture(event.pointerId);
+			containerElement.style.cursor = 'crosshair';
+
+		} else if (resizeHandle && nodeWrapper && selectedNodeId === nodeWrapper.getAttribute('data-node-id')) {
 			event.stopPropagation();
 			const nodeId = nodeWrapper.getAttribute('data-node-id');
 			if (!nodeId) return;
@@ -324,80 +453,101 @@
 			isResizingNode = true;
 			resizingNodeId = nodeId;
 			activeResizeHandle = resizeHandle;
+
 			resizeStartMouseX = event.clientX;
 			resizeStartMouseY = event.clientY;
-			nodeInitialX = node.x; // Store initial state of the node AT THE START of resize
+			nodeInitialX = node.x;
 			nodeInitialY = node.y;
 			nodeInitialWidth = node.width;
 			nodeInitialHeight = node.height;
-			containerElement.style.userSelect = 'none';
-			containerElement.setPointerCapture(event.pointerId);
-		} else if (nodeWrapper) {
-			event.stopPropagation();
-			const nodeId = nodeWrapper.getAttribute('data-node-id');
-			if (!nodeId) return;
-			const node = nodes.find((n) => n.id === nodeId);
-			if (!node) return;
 
-			isDraggingNode = true;
-			draggedNodeId = nodeId;
-			selectedNodeId = nodeId;
-			dragStartX = event.clientX; // Mouse position when drag started
-			dragStartY = event.clientY;
-			nodeStartDragX = node.x;   // Node's original X position when drag started
-			nodeStartDragY = node.y;   // Node's original Y position when drag started
 			containerElement.style.userSelect = 'none';
 			containerElement.setPointerCapture(event.pointerId);
-			containerElement.style.cursor = 'grabbing';
+		} else if (nodeWrapper && selectedNodeId === nodeWrapper.getAttribute('data-node-id')) {
+			if (!isTextEditable) {
+				event.stopPropagation();
+
+				const nodeId = nodeWrapper.getAttribute('data-node-id');
+				if (!nodeId) return;
+
+				const node = nodes.find((n) => n.id === nodeId);
+				if (!node) return;
+
+				isDraggingNode = true;
+				draggedNodeId = nodeId;
+
+				dragStartX = event.clientX;
+				dragStartY = event.clientY;
+				nodeStartDragX = node.x;
+				nodeStartDragY = node.y;
+
+				containerElement.style.userSelect = 'none';
+				containerElement.setPointerCapture(event.pointerId);
+				containerElement.style.cursor = 'grabbing';
+			}
 		} else if (targetElement === containerElement || targetElement === stageElement) {
 			isPanning = true;
 			startPanX = event.clientX - panX;
 			startPanY = event.clientY - panY;
-			selectedNodeId = null;
+
 			containerElement.setPointerCapture(event.pointerId);
 			containerElement.style.cursor = 'grabbing';
 		}
 	}
 
 	function handlePointerMove(event: PointerEvent) {
-		pointerVelX = event.movementX;
-		pointerVelY = event.movementY;
 		if (!event.isPrimary) return;
 
-		if (isResizingNode && resizingNodeId && activeResizeHandle) {
+		if (draggingConnection) {
 			event.preventDefault();
+			const mousePosScreen = getMousePosition(event);
+			draggingConnection = {
+				...draggingConnection,
+				currentMouseXScreen: mousePosScreen.x,
+				currentMouseYScreen: mousePosScreen.y,
+			};
+
+		} else if (isResizingNode && resizingNodeId && activeResizeHandle) {
+			event.preventDefault();
+
 			const dxScreen = event.clientX - resizeStartMouseX;
 			const dyScreen = event.clientY - resizeStartMouseY;
-			const dxStage = dxScreen / zoom; // Delta mouse movement in stage units
+
+			const dxStage = dxScreen / zoom;
 			const dyStage = dyScreen / zoom;
 
-			// Calculate TENTATIVE new geometry based on initial state + mouse delta
-			// These are the values BEFORE snapping is applied for this frame
 			let tentativeX = nodeInitialX;
 			let tentativeY = nodeInitialY;
 			let tentativeWidth = nodeInitialWidth;
 			let tentativeHeight = nodeInitialHeight;
 
 			if (activeResizeHandle.includes('l')) {
-				tentativeWidth = Math.max(MIN_NODE_WIDTH, nodeInitialWidth - dxStage);
-				tentativeX = nodeInitialX + nodeInitialWidth - tentativeWidth; // Adjust X to keep right edge stationary
+				const initialRight = nodeInitialX + nodeInitialWidth;
+				tentativeX = nodeInitialX + dxStage;
+				tentativeWidth = Math.max(MIN_NODE_WIDTH, initialRight - tentativeX);
+				tentativeX = initialRight - tentativeWidth;
 			} else if (activeResizeHandle.includes('r')) {
+				const initialLeft = nodeInitialX;
 				tentativeWidth = Math.max(MIN_NODE_WIDTH, nodeInitialWidth + dxStage);
 			}
+
 			if (activeResizeHandle.includes('t')) {
-				tentativeHeight = Math.max(MIN_NODE_HEIGHT, nodeInitialHeight - dyStage);
-				tentativeY = nodeInitialY + nodeInitialHeight - tentativeHeight; // Adjust Y to keep bottom edge stationary
+				const initialBottom = nodeInitialY + nodeInitialHeight;
+				tentativeY = nodeInitialY + dyStage;
+				tentativeHeight = Math.max(MIN_NODE_HEIGHT, initialBottom - tentativeY);
+				tentativeY = initialBottom - tentativeHeight;
 			} else if (activeResizeHandle.includes('b')) {
+				const initialTop = nodeInitialY;
 				tentativeHeight = Math.max(MIN_NODE_HEIGHT, nodeInitialHeight + dyStage);
 			}
-			// For middle handles, one dimension/position is preserved from nodeInitial
+
 			if (activeResizeHandle === 't' || activeResizeHandle === 'b') {
 				tentativeWidth = nodeInitialWidth; tentativeX = nodeInitialX;
 			}
 			if (activeResizeHandle === 'l' || activeResizeHandle === 'r') {
 				tentativeHeight = nodeInitialHeight; tentativeY = nodeInitialY;
 			}
-			
+
 			const snappedGeom = calculateAndApplySnapsForResize(
                 resizingNodeId,
                 { x: tentativeX, y: tentativeY, width: tentativeWidth, height: tentativeHeight },
@@ -409,12 +559,13 @@
 			);
 		} else if (isDraggingNode && draggedNodeId) {
 			event.preventDefault();
+
 			const dxScreen = event.clientX - dragStartX;
 			const dyScreen = event.clientY - dragStartY;
+
 			const dxStage = dxScreen / zoom;
 			const dyStage = dyScreen / zoom;
 
-			// Calculate TENTATIVE new position based on original start + total mouse delta
 			let tentativeNewX = nodeStartDragX + dxStage;
 			let tentativeNewY = nodeStartDragY + dyStage;
 
@@ -423,7 +574,7 @@
                 tentativeNewX,
                 tentativeNewY
             );
-            
+
 			nodes = nodes.map((n) => (n.id === draggedNodeId ? { ...n, x: snappedX, y: snappedY } : n));
 		} else if (isPanning) {
 			event.preventDefault();
@@ -434,42 +585,83 @@
 
 	function handlePointerUp(event: PointerEvent) {
 		if (event.button !== 0) return;
-		activeSnapLines = []; // Clear lines on pointer up, regardless of action
 
-		if (isResizingNode) {
+		if (draggingConnection) {
+			const targetElement = event.target as HTMLElement;
+			const targetConnectorHandle = targetElement.dataset.connectorHandle as ConnectorHandleType;
+			const targetNodeWrapper = targetElement.closest('.node-wrapper');
+			const targetNodeId = targetNodeWrapper?.getAttribute('data-node-id');
+
+			if (targetNodeId && targetConnectorHandle && targetNodeId !== draggingConnection.startNodeId) {
+				dispatch('addConnection', {
+					from: draggingConnection.startNodeId,
+					to: targetNodeId,
+				});
+			} else {
+				console.log('Connection drag ended on invalid target.');
+			}
+
+			containerElement.releasePointerCapture(event.pointerId);
+			draggingConnection = null;
+			if (containerElement) containerElement.style.cursor = 'grab';
+
+		} else if (isResizingNode) {
 			containerElement.releasePointerCapture(event.pointerId);
 			isResizingNode = false;
 			resizingNodeId = null;
 			activeResizeHandle = null;
-			tick().then(() => { if (containerElement) containerElement.style.userSelect = ''; });
+			activeSnapLines = [];
+			tick().then(() => {
+				if (containerElement) {
+					containerElement.style.userSelect = '';
+				}
+			});
 		} else if (isDraggingNode) {
 			containerElement.releasePointerCapture(event.pointerId);
 			isDraggingNode = false;
 			draggedNodeId = null;
-			tick().then(() => { if (containerElement) containerElement.style.userSelect = ''; });
+			activeSnapLines = [];
+			tick().then(() => {
+				if (containerElement) {
+					containerElement.style.userSelect = '';
+				}
+			});
 		} else if (isPanning) {
 			containerElement.releasePointerCapture(event.pointerId);
 			isPanning = false;
+			activeSnapLines = [];
 		}
-		if (containerElement) containerElement.style.cursor = 'grab';
+
+		if (containerElement && !isDraggingNode && !isResizingNode && !isPanning && !draggingConnection) {
+             containerElement.style.cursor = 'grab';
+        }
 	}
 
 	function handlePointerLeave(event: PointerEvent) {
-		if (isDraggingNode || isPanning || isResizingNode) {
-			handlePointerUp(event); // Treat as pointer up to release states and clear lines
+		if (draggingConnection) {
+			containerElement.releasePointerCapture(event.pointerId);
+			draggingConnection = null;
+			containerElement.style.cursor = 'grab';
+		}
+		else if (isDraggingNode || isPanning || isResizingNode) {
+			handlePointerUp(event);
 		}
 	}
 
 	function handleWheel(event: WheelEvent) {
 		event.preventDefault();
-		activeSnapLines = []; // Clear snap lines if zooming occurs
+		activeSnapLines = [];
 		const { x: mouseX, y: mouseY } = getMousePosition(event);
+
 		const delta = -event.deltaY * zoomSensitivity;
 		const newZoom = Math.max(minZoom, Math.min(maxZoom, zoom * (1 + delta)));
+
 		const stageMouseX = (mouseX - panX) / zoom;
 		const stageMouseY = (mouseY - panY) / zoom;
+
 		const newPanX = mouseX - stageMouseX * newZoom;
 		const newPanY = mouseY - stageMouseY * newZoom;
+
 		zoom = newZoom;
 		panX = newPanX;
 		panY = newPanY;
@@ -520,16 +712,66 @@
 			showId: props.showId ?? (nodes[0]?.showId ?? false),
 			props
 		};
+
 		nodes = [...nodes, newNode];
 		return newNode;
 	}
 
-	export function panBy(dx: number, dy: number): void { panX += dx; panY += dy; }
+	export function addConnection(fromNodeId: string, toNodeId: string, fromHandle: ConnectorHandleType = 'bottom', toHandle: ConnectorHandleType = 'top'): Connection | null {
+		const fromNode = nodes.find(n => n.id === fromNodeId);
+		const toNode = nodes.find(n => n.id === toNodeId);
+
+		if (!fromNode || !toNode || fromNodeId === toNodeId) {
+			console.warn(`Cannot connect nodes: Invalid IDs or same node (${fromNodeId} -> ${toNodeId})`);
+			return null;
+		}
+
+		const existing = connections.find(conn =>
+			conn.from.nodeId === fromNodeId && conn.from.handle === fromHandle &&
+			conn.to.nodeId === toNodeId && conn.to.handle === toHandle
+		);
+
+		if (existing) {
+			console.warn(`Connection already exists: ${fromNodeId} (${fromHandle}) -> ${toNodeId} (${toHandle})`);
+			return null;
+		}
+
+		const newConnection: Connection = {
+			id: crypto.randomUUID(),
+			from: { nodeId: fromNodeId, handle: fromHandle },
+			to: { nodeId: toNodeId, handle: toHandle },
+		};
+
+		connections = [...connections, newConnection];
+		console.log(`Added connection: ${fromNodeId} -> ${toNodeId}`);
+		return newConnection;
+	}
+
+	export function removeConnection(connectionId: string): void {
+		connections = connections.filter(conn => conn.id !== connectionId);
+	}
+
+	export function removeConnectionsForNode(nodeId: string): void {
+		connections = connections.filter(conn => conn.from.nodeId !== nodeId && conn.to.nodeId !== nodeId);
+	}
+
+	export function setConnectionsState(newConnections: Connection[]): void {
+		connections = newConnections;
+	}
+
+	export function panBy(dx: number, dy: number): void {
+		panX += dx;
+		panY += dy;
+	}
+
 	export function panTo(targetX: number, targetY: number): void {
 		if (!containerElement) return;
-		panX = containerElement.clientWidth / 2 - targetX * zoom;
-		panY = containerElement.clientHeight / 2 - targetY * zoom;
+		const containerWidth = containerElement.clientWidth;
+		const containerHeight = containerElement.clientHeight;
+		panX = containerWidth / 2 - targetX * zoom;
+		panY = containerHeight / 2 - targetY * zoom;
 	}
+
 	export function setZoom(newZoomLevel: number, centerX?: number, centerY?: number): void {
 		const clampedZoom = Math.max(minZoom, Math.min(maxZoom, newZoomLevel));
 		if (centerX !== undefined && centerY !== undefined && containerElement) {
@@ -547,14 +789,23 @@
 		}
 		zoom = clampedZoom;
 	}
-	export function getViewport(): { panX: number; panY: number; zoom: number } { return { panX, panY, zoom }; }
-	export function getSelectedNodeId(): string | null { return selectedNodeId; }
-	export function setSelectedNodeId(id: string | null): void { selectedNodeId = id; }
+
+	export function getViewport(): { panX: number; panY: number; zoom: number } {
+		return { panX, panY, zoom };
+	}
+
+	export function getSelectedNodeId(): string | null {
+		return selectedNodeId;
+	}
+
+	export function setSelectedNodeId(id: string | null): void {
+		selectedNodeId = id;
+	}
 
 	const resizeHandles: ResizeHandleType[] = ['tl', 't', 'tr', 'l', 'r', 'bl', 'b', 'br'];
+	const connectorHandles: ConnectorHandleType[] = ['top', 'right', 'bottom', 'left'];
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
 	class="whiteboard-container"
 	bind:this={containerElement}
@@ -588,19 +839,31 @@
 						<div
 							class="resize-handle resize-handle-{handle}"
 							data-resize-handle={handle}
-							aria-label="Resize node {handle.replace('t','top ').replace('b','bottom ').replace('l','left ').replace('r','right ').trim()}"
+							aria-label="Resize node {handle
+								.replace('t', 'top ')
+								.replace('b', 'bottom ')
+								.replace('l', 'left ')
+								.replace('r', 'right ')
+								.trim()}"
+						></div>
+					{/each}
+					{#each connectorHandles as handle}
+						<div
+							class="connector-handle connector-handle-{handle}"
+							data-connector-handle={handle}
+							data-node-id={node.id}
+							aria-label="Connect from {handle} of node {node.id}"
 						></div>
 					{/each}
 				{/if}
 			</div>
 		{/each}
 
-		<!-- Snap Lines -->
 		{#each activeSnapLines as line (line.type + line.stageValue + line.start + line.end)}
             <div
                 class="snap-line"
                 style:position="absolute"
-                style:background-color="rgba(255, 0, 150, 0.6)" 
+                style:background-color="rgba(255, 0, 150, 0.6)"
                 style:left="{line.type === 'v' ? line.stageValue - 0.5 : line.start}px"
                 style:top="{line.type === 'h' ? line.stageValue - 0.5 : line.start}px"
                 style:width="{line.type === 'v' ? '1px' : (line.end - line.start)}px"
@@ -609,6 +872,41 @@
             ></div>
         {/each}
 	</div>
+
+	{#if showConnections || draggingConnection}
+		<svg class="connection-layer" bind:this={svgConnectionLayer}>
+			{#if showConnections}
+				{#each connectionLines as line (line.id)}
+					<line
+						x1={line.x1}
+						y1={line.y1}
+						x2={line.x2}
+						y2={line.y2}
+						stroke="grey"
+						stroke-width="2"
+						marker-end="url(#arrowhead)"
+					/>
+				{/each}
+			{/if}
+			{#if draggingConnection}
+				<line
+					x1={stageToScreenCoordinates(draggingConnection.startXStage, draggingConnection.startYStage).x}
+					y1={stageToScreenCoordinates(draggingConnection.startXStage, draggingConnection.startYStage).y}
+					x2={draggingConnection.currentMouseXScreen}
+					y2={draggingConnection.currentMouseYScreen}
+					stroke="rgba(0, 0, 255, 0.7)"
+					stroke-width="2"
+					stroke-dasharray="5,5"
+				/>
+			{/if}
+            <defs>
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="grey" />
+                </marker>
+            </defs>
+		</svg>
+	{/if}
+
 </div>
 
 <style>
@@ -638,6 +936,7 @@
 		z-index: 1;
 		display: flex;
 		flex-direction: column;
+		box-sizing: border-box;
 	}
 
 	.node-wrapper.selected {
@@ -662,6 +961,7 @@
 		box-sizing: border-box;
 		z-index: 11;
 	}
+
 	.resize-handle-tl { top: -5px; left: -5px; cursor: nwse-resize; }
 	.resize-handle-t { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
 	.resize-handle-tr { top: -5px; right: -5px; cursor: nesw-resize; }
@@ -671,13 +971,54 @@
 	.resize-handle-b { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
 	.resize-handle-br { bottom: -5px; right: -5px; cursor: nwse-resize; }
 
+	.connector-handle {
+		position: absolute;
+		width: 12px;
+		height: 12px;
+		background-color: #28a745;
+		border: 1px solid white;
+		border-radius: 50%;
+		box-sizing: border-box;
+		z-index: 11;
+		cursor: crosshair;
+		opacity: 0;
+		transition: opacity 0.1s ease-in-out;
+	}
 
-	.whiteboard-container:focus { outline: 2px solid blue; outline-offset: 2px; }
-	.whiteboard-container:focus:not(:focus-visible) { outline: none; }
-	.whiteboard-container:focus-visible { outline: 2px solid blue; outline-offset: 2px; }
+	.node-wrapper.selected .connector-handle {
+		opacity: 1;
+	}
+
+	.connector-handle-top { top: -6px; left: 50%; transform: translateX(-50%); }
+	.connector-handle-right { top: 50%; right: -6px; transform: translateY(-50%); }
+	.connector-handle-bottom { bottom: -6px; left: 50%; transform: translateX(-50%); }
+	.connector-handle-left { top: 50%; left: -6px; transform: translateY(-50%); }
+
+
+	.whiteboard-container:focus {
+		outline: 2px solid blue;
+		outline-offset: 2px;
+	}
+	.whiteboard-container:focus:not(:focus-visible) {
+		outline: none;
+	}
+	.whiteboard-container:focus-visible {
+		outline: 2px solid blue;
+		outline-offset: 2px;
+	}
 
 	.snap-line {
-		z-index: 5; 
-		pointer-events: none; 
+		z-index: 5;
+		pointer-events: none;
+	}
+
+	.connection-layer {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+		overflow: visible;
 	}
 </style>
