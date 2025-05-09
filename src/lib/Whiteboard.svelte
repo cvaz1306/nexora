@@ -179,6 +179,23 @@
 		);
 	}
 
+	function calculateAngle(from: { x: number; y: number }, to: { x: number; y: number }) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  return angle;
+}
+
+
+function calculateAngleLine(line: { x1: number; y1: number; x2: number; y2: number }) {
+  const from = { x: line.x1, y: line.y1 };
+  const to = { x: line.x2, y: line.y2 };
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  return angle;
+}
+
 	function calculateAndApplySnapsForDrag(
         activeNodeId: string,
         tentativeX: number,
@@ -896,6 +913,17 @@
 						stroke-width="2"
 						marker-end="url(#arrowhead)"
 					/>
+					<!-- x={(line.x1 + line.x2) / 2 - 5}
+					y={(line.y1 + line.y2) / 2 - 5} -->
+					<rect
+					width="40"
+					height="10"
+					x={0}
+					y={0}
+					rx="2"
+					fill="grey"
+					transform={`translate(${(line.x1 + line.x2) / 2}, ${(line.y1 + line.y2) / 2}) rotate(${calculateAngleLine(line)}) translate(-20, -5)`}
+				  />
 				{/each}
 			{/if}
 			{#if draggingConnection}
@@ -971,6 +999,18 @@
 		box-sizing: border-box;
 		z-index: 11;
 	}
+
+	.connection-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  background-color: #fff;
+  border-radius: 50%;
+  cursor: grab;
+}
 
 	.resize-handle-tl { top: -5px; left: -5px; cursor: nwse-resize; }
 	.resize-handle-t { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
