@@ -1,5 +1,4 @@
 <script context="module" lang="ts">
-	// Export types defined in the module script
 	import type { ComponentType, SvelteComponent } from 'svelte';
 
 	export type NodeData = {
@@ -23,10 +22,8 @@
 </script>
 
 <script lang="ts">
-	// Import the component type itself for bind:this and type hints
-	import type Whiteboard from '$lib/Whiteboard.svelte'; // Corrected import syntax for the component instance type
+	import type Whiteboard from '$lib/Whiteboard.svelte';
 
-	// Import types from the module script
 	import type { NodeData, Connection, ConnectorHandleType } from '$lib/Whiteboard.svelte';
 
 	import { onMount, onDestroy, tick, createEventDispatcher } from 'svelte';
@@ -48,6 +45,7 @@
 	const MIN_NODE_WIDTH = 30;
 	const MIN_NODE_HEIGHT = 30;
 	const SNAP_THRESHOLD_STAGE = 8;
+	const CONNECTOR_HANDLE_OFFSET = 20; // Offset from the center along the edge
 
 	let panX = 0;
 	let panY = 0;
@@ -159,12 +157,14 @@
 	function getConnectorPosition(node: NodeData, handle: ConnectorHandleType): { x: number; y: number } {
 		const nodeCenterX = node.x + node.width / 2;
 		const nodeCenterY = node.y + node.height / 2;
+		const handleSize = 12; // Should match CSS .connector-handle width/height
+		const offset = CONNECTOR_HANDLE_OFFSET; // Use constant offset
 
 		switch (handle) {
-			case 'top': return { x: nodeCenterX, y: node.y };
-			case 'bottom': return { x: nodeCenterX, y: node.y + node.height };
-			case 'left': return { x: node.x, y: nodeCenterY };
-			case 'right': return { x: node.x + node.width, y: nodeCenterY };
+			case 'top': return { x: nodeCenterX - offset, y: node.y };
+			case 'bottom': return { x: nodeCenterX + offset, y: node.y + node.height };
+			case 'left': return { x: node.x, y: nodeCenterY - offset };
+			case 'right': return { x: node.x + node.width, y: nodeCenterY + offset };
 		}
 	}
 
@@ -404,22 +404,6 @@
 							   targetElement.tagName === 'INPUT' ||
 							   targetElement.tagName === 'TEXTAREA';
 
-		if (selectedNodeId && nodeWrapper && nodeWrapper.getAttribute('data-node-id') === selectedNodeId && !resizeHandle && !connectorHandle && !isTextEditable) {
-             // Keep selected, allow drag below
-        } else if (selectedNodeId && nodeWrapper && nodeWrapper.getAttribute('data-node-id') !== selectedNodeId) {
-             selectedNodeId = nodeWrapper.getAttribute('data-node-id');
-             event.stopPropagation();
-             return;
-        } else if (!nodeWrapper && selectedNodeId !== null) {
-             selectedNodeId = null;
-        } else if (nodeWrapper && !selectedNodeId) {
-			selectedNodeId = nodeWrapper.getAttribute('data-node-id');
-			event.stopPropagation();
-			return;
-		}
-
-		if (event.button !== 0) return;
-
 		if (connectorHandle && nodeWrapper) {
 			event.stopPropagation();
 			const nodeId = nodeWrapper.getAttribute('data-node-id');
@@ -485,7 +469,15 @@
 				containerElement.setPointerCapture(event.pointerId);
 				containerElement.style.cursor = 'grabbing';
 			}
-		} else if (targetElement === containerElement || targetElement === stageElement) {
+		} else if (nodeWrapper && nodeWrapper.getAttribute('data-node-id') !== selectedNodeId) {
+             selectedNodeId = nodeWrapper.getAttribute('data-node-id');
+             event.stopPropagation();
+             return;
+        }
+		else if (!nodeWrapper && selectedNodeId !== null) {
+             selectedNodeId = null;
+        }
+		else if (targetElement === containerElement || targetElement === stageElement) {
 			isPanning = true;
 			startPanX = event.clientX - panX;
 			startPanY = event.clientY - panY;
@@ -847,15 +839,15 @@
 								.trim()}"
 						></div>
 					{/each}
-					{#each connectorHandles as handle}
-						<div
-							class="connector-handle connector-handle-{handle}"
-							data-connector-handle={handle}
-							data-node-id={node.id}
-							aria-label="Connect from {handle} of node {node.id}"
-						></div>
-					{/each}
 				{/if}
+				{#each connectorHandles as handle}
+					<div
+						class="connector-handle connector-handle-{handle}"
+						data-connector-handle={handle}
+						data-node-id={node.id}
+						aria-label="Connect from {handle} of node {node.id}"
+					></div>
+				{/each}
 			</div>
 		{/each}
 
@@ -981,18 +973,19 @@
 		box-sizing: border-box;
 		z-index: 11;
 		cursor: crosshair;
-		opacity: 0;
+		opacity: 0.8; /* Always visible but slightly transparent */
 		transition: opacity 0.1s ease-in-out;
 	}
 
-	.node-wrapper.selected .connector-handle {
-		opacity: 1;
+	.connector-handle:hover {
+		opacity: 1; /* Fully opaque on hover */
 	}
 
-	.connector-handle-top { top: -6px; left: 50%; transform: translateX(-50%); }
-	.connector-handle-right { top: 50%; right: -6px; transform: translateY(-50%); }
-	.connector-handle-bottom { bottom: -6px; left: 50%; transform: translateX(-50%); }
-	.connector-handle-left { top: 50%; left: -6px; transform: translateY(-50%); }
+	/* Position connector handles, offset from center */
+	.connector-handle-top { top: -6px; left: 50%; transform: translateX(-50%) translateY(-20px); }
+	.connector-handle-right { top: 50%; right: -6px; transform: translateY(-50%) translateX(20px); }
+	.connector-handle-bottom { bottom: -6px; left: 50%; transform: translateX(-50%) translateY(20px); }
+	.connector-handle-left { top: 50%; left: -6px; transform: translateY(-50%) translateX(-20px); }
 
 
 	.whiteboard-container:focus {

@@ -22,7 +22,7 @@
 			height: 180,
 			showId: true,
 			props: {
-				text: 'Hello Whiteboard!\n\nTry resizing or dragging me.\n\nClick my green dots to connect!',
+				text: 'Hello Whiteboard!\n\nTry resizing or dragging me.\n\nConnect me!',
 				fontSize: 20
 			}
 		},
@@ -84,7 +84,7 @@
 <strong>set connections</strong> <em><on|off></em>   - Toggles visibility of connection lines.
                                   e.g., <strong>set connections</strong> <em>off</em>
 <strong>reset</strong>                           - Resets pan to (0,0) and zoom to 1x. (alias: <strong>resetview</strong>)
-<strong>arrange</strong> <em>[padding]</em>           - Arranges nodes in a grid based on current proximity. (alias: <strong>layout</strong>)
+<strong>arrange</strong> <em>[padding]</em>           - Arranges nodes in a grid based on current proximity and connections. (alias: <strong>layout</strong>)
                                   e.g., <strong>arrange</strong> <em>50</em>
 <strong>log</strong>                             - Logs current nodes and connections to console. (alias: <strong>ls</strong>)
 <strong>clear</strong>                           - Clears all nodes and connections. (alias: <strong>cls</strong>)
@@ -109,16 +109,6 @@
 				controller: controller,
 				showHelp: () => { showHelpModal = true; }
 			});
-
-			// Add initial connections for testing/demo after component mounts
-			// tick().then(() => {
-			// 	if (nodes.length >= 2) {
-			// 		whiteboardInstance.addConnection(nodes[0].id, nodes[2].id, 'bottom', 'top');
-			// 		if(nodes.length >= 4) {
-			// 			whiteboardInstance.addConnection(nodes[2].id, nodes[3].id, 'bottom', 'top');
-			// 		}
-			// 	}
-			// });
 
 		} else {
 			console.error("Whiteboard instance not ready onMount. This shouldn't happen with bind:this.");

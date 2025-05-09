@@ -159,7 +159,7 @@ export class WhiteboardController {
 			console.warn('Whiteboard instance not available for toggling connections.');
 			return;
 		}
-		const currentShow = (this.whiteboard as any).showConnections; // Access bound prop via instance - use 'any' to bypass strict TS check if prop isn't in the instance type
+		const currentShow = (this.whiteboard as any).showConnections;
 
 		const newShowState = show !== undefined ? show : !currentShow;
 		this.setShowConnectionsState(newShowState);
@@ -332,8 +332,9 @@ export class WhiteboardController {
 			const totalLayoutEstWidth = estimatedCols * (avgNodeWidth + padding);
 			const totalLayoutEstHeight = estimatedRows * (avgNodeHeight + padding);
 
-			const targetCol = Math.min(estimatedCols - 1, Math.floor(relativeX / totalLayoutEstWidth * estimatedCols));
-			const targetRow = Math.min(estimatedRows - 1, Math.floor(relativeY / totalLayoutEstHeight * estimatedRows));
+			const targetCol = Math.min(estimatedCols - 1, Math.floor(relativeX / (currentLayoutWidth || 1) * estimatedCols)); // Scale relative pos by actual bounds
+			const targetRow = Math.min(estimatedRows - 1, Math.floor(relativeY / (currentLayoutHeight || 1) * estimatedRows)); // Scale relative pos by actual bounds
+
 
 			const clampedTargetCol = Math.max(0, Math.min(estimatedCols - 1, targetCol));
 			const clampedTargetRow = Math.max(0, Math.min(estimatedRows - 1, targetRow));
@@ -344,7 +345,7 @@ export class WhiteboardController {
 			for (let r = 0; r < estimatedRows; r++) {
 				for (let c = 0; c < estimatedCols; c++) {
 					if (grid[r][c] === null) {
-						const distSq = (r - clampedTargetRow) * (r - clampedTargetCol) + (c - clampedTargetCol) * (c - clampedTargetCol); // Typo in previous logic (r - clampedTargetCol)
+						const distSq = (r - clampedTargetRow) * (r - clampedTargetRow) + (c - clampedTargetCol) * (c - clampedTargetCol);
 						if (distSq < minDistanceSq) {
 							minDistanceSq = distSq;
 							bestRow = r;
@@ -398,14 +399,14 @@ export class WhiteboardController {
          let currentCol = 0;
          nodesWithGridPos.forEach(node => {
              if (node.gridRow === undefined || node.gridCol === undefined) {
-                 while(currentRow < estimatedRows && grid[currentRow][currentCol] !== null) {
+                 while(currentRow < estimatedRows && currentCol < estimatedCols && grid[currentRow][currentCol] !== null) {
                       currentCol++;
                       if (currentCol >= estimatedCols) {
                            currentCol = 0;
                            currentRow++;
                       }
                  }
-                 if (currentRow < estimatedRows) {
+                 if (currentRow < estimatedRows && currentCol < estimatedCols) {
                       grid[currentRow][currentCol] = node.id;
                       node.gridRow = currentRow;
                       node.gridCol = currentCol;
