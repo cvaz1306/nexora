@@ -332,9 +332,8 @@ export class WhiteboardController {
 			const totalLayoutEstWidth = estimatedCols * (avgNodeWidth + padding);
 			const totalLayoutEstHeight = estimatedRows * (avgNodeHeight + padding);
 
-			const targetCol = Math.min(estimatedCols - 1, Math.floor(relativeX / (currentLayoutWidth || 1) * estimatedCols)); // Scale relative pos by actual bounds
-			const targetRow = Math.min(estimatedRows - 1, Math.floor(relativeY / (currentLayoutHeight || 1) * estimatedRows)); // Scale relative pos by actual bounds
-
+			const targetCol = Math.min(estimatedCols - 1, Math.floor(relativeX / (currentLayoutWidth || 1) * estimatedCols));
+			const targetRow = Math.min(estimatedRows - 1, Math.floor(relativeY / (currentLayoutHeight || 1) * estimatedRows));
 
 			const clampedTargetCol = Math.max(0, Math.min(estimatedCols - 1, targetCol));
 			const clampedTargetRow = Math.max(0, Math.min(estimatedRows - 1, targetRow));

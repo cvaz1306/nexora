@@ -45,7 +45,7 @@
 	const MIN_NODE_WIDTH = 30;
 	const MIN_NODE_HEIGHT = 30;
 	const SNAP_THRESHOLD_STAGE = 8;
-	const CONNECTOR_HANDLE_OFFSET = 20; // Offset from the center along the edge
+	const CONNECTOR_HANDLE_OFFSET = 20;
 
 	let panX = 0;
 	let panY = 0;
@@ -110,6 +110,7 @@
 	$: connectionLines = connections.map(conn => {
 		const fromNode = nodes.find(n => n.id === conn.from.nodeId);
 		const toNode = nodes.find(n => n.id === conn.to.nodeId);
+		let xmodxy = Math.abs((panX * panY) % 20 / 17); //Keep this in. It forces the reactivity system to update when panX and panY change (i dont know why it doesnt do this automatically)
 
 		if (!fromNode || !toNode) return null;
 
@@ -157,14 +158,13 @@
 	function getConnectorPosition(node: NodeData, handle: ConnectorHandleType): { x: number; y: number } {
 		const nodeCenterX = node.x + node.width / 2;
 		const nodeCenterY = node.y + node.height / 2;
-		const handleSize = 12; // Should match CSS .connector-handle width/height
-		const offset = CONNECTOR_HANDLE_OFFSET; // Use constant offset
+		const offset = CONNECTOR_HANDLE_OFFSET;
 
 		switch (handle) {
-			case 'top': return { x: nodeCenterX - offset, y: node.y };
-			case 'bottom': return { x: nodeCenterX + offset, y: node.y + node.height };
-			case 'left': return { x: node.x, y: nodeCenterY - offset };
-			case 'right': return { x: node.x + node.width, y: nodeCenterY + offset };
+			case 'top': return { x: nodeCenterX, y: node.y - offset }; // Offset Y
+			case 'bottom': return { x: nodeCenterX, y: node.y + node.height + offset }; // Offset Y
+			case 'left': return { x: node.x - offset, y: nodeCenterY }; // Offset X
+			case 'right': return { x: node.x + node.width + offset, y: nodeCenterY }; // Offset X
 		}
 	}
 
@@ -579,12 +579,17 @@
 		if (event.button !== 0) return;
 
 		if (draggingConnection) {
-			const targetElement = event.target as HTMLElement;
-			const targetConnectorHandle = targetElement.dataset.connectorHandle as ConnectorHandleType;
-			const targetNodeWrapper = targetElement.closest('.node-wrapper');
+			// Use elementFromPoint to get the element visually under the pointer
+			const elementUnderPointer = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+
+			// Find if this element or an ancestor is a connector handle
+			const droppedOnConnector = elementUnderPointer?.closest('.connector-handle') as HTMLElement | null;
+			const targetConnectorHandle = droppedOnConnector?.dataset.connectorHandle as ConnectorHandleType | undefined;
+			const targetNodeWrapper = droppedOnConnector?.closest('.node-wrapper');
 			const targetNodeId = targetNodeWrapper?.getAttribute('data-node-id');
 
 			if (targetNodeId && targetConnectorHandle && targetNodeId !== draggingConnection.startNodeId) {
+				console.log(`Connection drag finished on connector ${targetConnectorHandle} of node ${targetNodeId}`);
 				dispatch('addConnection', {
 					from: draggingConnection.startNodeId,
 					to: targetNodeId,
@@ -654,9 +659,9 @@
 		const newPanX = mouseX - stageMouseX * newZoom;
 		const newPanY = mouseY - stageMouseY * newZoom;
 
-		zoom = newZoom;
 		panX = newPanX;
 		panY = newPanY;
+		zoom = newZoom; // Assign zoom *after* calculating new pan for smoother effect
 	}
 
 	onMount(() => {
@@ -973,15 +978,15 @@
 		box-sizing: border-box;
 		z-index: 11;
 		cursor: crosshair;
-		opacity: 0.8; /* Always visible but slightly transparent */
+		opacity: 0.8;
 		transition: opacity 0.1s ease-in-out;
 	}
 
 	.connector-handle:hover {
-		opacity: 1; /* Fully opaque on hover */
+		opacity: 1;
 	}
 
-	/* Position connector handles, offset from center */
+	/* Position connector handles, offset from the node boundary */
 	.connector-handle-top { top: -6px; left: 50%; transform: translateX(-50%) translateY(-20px); }
 	.connector-handle-right { top: 50%; right: -6px; transform: translateY(-50%) translateX(20px); }
 	.connector-handle-bottom { bottom: -6px; left: 50%; transform: translateX(-50%) translateY(20px); }
@@ -1011,7 +1016,7 @@
 		left: 0;
 		width: 100%;
 		height: 100%;
-		pointer-events: none;
+		pointer-events: none; /* Allow interaction with nodes behind SVG */
 		overflow: visible;
 	}
 </style>
