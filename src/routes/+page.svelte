@@ -132,10 +132,10 @@
 		}
 	});
 
-	function handleAddConnection(event: CustomEvent<{ from: string; to: string }>) {
-		const { from, to } = event.detail;
+	function handleAddConnection(event: CustomEvent<{ from: string; to: string, fromHandle: string; toHandle: string }>) {
+		const { from, to, fromHandle, toHandle } = event.detail;
 		if (controller) {
-            controller.connectNodes(from, to);
+            controller.connectNodes(from, to, fromHandle, toHandle);
         } else {
             console.warn("Controller not ready to handle addConnection event.");
         }

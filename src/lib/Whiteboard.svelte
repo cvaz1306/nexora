@@ -593,6 +593,9 @@
 				dispatch('addConnection', {
 					from: draggingConnection.startNodeId,
 					to: targetNodeId,
+					fromHandle: draggingConnection.startHandle,
+					toHandle: targetConnectorHandle
+
 				});
 			} else {
 				console.log('Connection drag ended on invalid target.');
@@ -702,7 +705,7 @@
 				return;
 		}
 		const newNode: NodeData = {
-			id: crypto.randomUUID(),
+			id: crypto.randomUUID().slice(0, 8),
 			component, x, y,
 			width: typeof props.width === 'number' ? props.width : defaultWidth,
 			height: typeof props.height === 'number' ? props.height : defaultHeight,
@@ -710,8 +713,18 @@
 			props
 		};
 
+		selectedNodeId = newNode.id;
+
 		nodes = [...nodes, newNode];
 		return newNode;
+	}
+
+	export function removeNode(id: string): void {
+		nodes = nodes.filter(n => n.id !== id);
+	}
+
+	export function selectNode(id: string): void {
+		selectedNodeId = id;
 	}
 
 	export function addConnection(fromNodeId: string, toNodeId: string, fromHandle: ConnectorHandleType = 'bottom', toHandle: ConnectorHandleType = 'top'): Connection | null {
@@ -734,7 +747,7 @@
 		}
 
 		const newConnection: Connection = {
-			id: crypto.randomUUID(),
+			id: crypto.randomUUID().slice(0, 8),
 			from: { nodeId: fromNodeId, handle: fromHandle },
 			to: { nodeId: toNodeId, handle: toHandle },
 		};

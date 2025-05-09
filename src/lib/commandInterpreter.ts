@@ -56,6 +56,24 @@ export class CommandInterpreter {
 					this.showHelpCallback();
 				}
 				break;
+			case 'remove':
+			case 'delete':
+				if (params.length < 1) {
+					console.warn('Usage: delete <nodeId>');
+					this.showHelpCallback();
+					return;
+				}
+				this.controller.deleteNode(params[0]);
+				break;
+			case 'select':
+				if (params.length < 1) {
+					console.warn('Usage: select <nodeId>');
+					this.showHelpCallback();
+					return;
+				}
+				this.controller.selectNode(params[0]);
+				break;
+			
 			case 'text':
 				this.controller.addTextNode(params.join(' '));
 				break;

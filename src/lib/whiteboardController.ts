@@ -138,7 +138,23 @@ export class WhiteboardController {
 		}
 	}
 
-	public connectNodes(id1: string, id2: string): void {
+	public selectNode(id: string): void {
+		if (!this.whiteboard) {
+			console.warn('Whiteboard instance not available for selecting node.');
+			return;
+		}
+		this.whiteboard.selectNode(id);
+	}
+
+	public deleteNode(id: string): void {
+		if (!this.whiteboard) {
+			console.warn('Whiteboard instance not available for deleting node.');
+			return;
+		}
+		this.whiteboard.removeNode(id);
+	}
+
+	public connectNodes(id1: string, id2: string, fromHandle: ConnectorHandleType = 'bottom', toHandle: ConnectorHandleType = 'top'): void {
 		if (!this.whiteboard) {
 			console.warn('Whiteboard instance not available for connecting nodes.');
 			return;
@@ -151,7 +167,7 @@ export class WhiteboardController {
 			return;
 		}
 
-		this.whiteboard.addConnection(id1, id2, 'bottom', 'top');
+		this.whiteboard.addConnection(id1, id2, fromHandle, toHandle);
 	}
 
 	public toggleConnectionsVisibility(show?: boolean): void {
